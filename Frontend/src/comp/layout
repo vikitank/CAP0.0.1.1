@@ -1,0 +1,202 @@
+import { useState, useEffect, useRef } from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import useAuthStore from '../../store/authStore';
+import { authApi } from '../../services/api';
+import toast from 'react-hot-toast';
+import AIAssistant from '../shared/AIAssistant.jsx';
+import {
+  LayoutDashboard, FileText, BookOpen, TrendingUp, Package,
+  CheckCircle, FileCheck, Users, BarChart3, Settings,
+  CreditCard, Bell, Search, Moon, Sun, LogOut, ChevronDown,
+  Menu, X, Cpu
+} from 'lucide-react';
+
+const NAV = [
+  { section: 'Main' },
+  { path: '/dashboard',    icon: LayoutDashboard, label: 'Dashboard' },
+  { path: '/vouchers',     icon: FileText,         label: 'Voucher Entry' },
+  { path: '/accounting',   icon: BookOpen,         label: 'Accounting' },
+  { path: '/sales',        icon: TrendingUp,       label: 'Sales & Purchase' },
+  { path: '/inventory',    icon: Package,          label: 'Inventory' },
+  { section: 'Compliance' },
+  { path: '/gst',          icon: CheckCircle,      label: 'GST & Taxes',      badge: '3' },
+  { path: '/einvoice',     icon: FileCheck,        label: 'e-Invoice & e-Way' },
+  { section: 'Finance' },
+  { path: '/reports',      icon: BarChart3,        label: 'Reports' },
+  { path: '/payroll',      icon: Users,            label: 'Payroll & HR' },
+  { section: 'Account' },
+  { path: '/subscription', icon: CreditCard,       label: 'Subscription' },
+  { path: '/settings',     icon: Settings,         label: 'Settings' },
+];
+
+export default function AppLayout() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, activeCompanyId, setActiveCompany, getActiveCompany, logout } = useAuthStore();
+  const [dark, setDark] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [companyDdOpen, setCompanyDdOpen] = useState(false);
+  const [userDdOpen, setUserDdOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const companyRef = useRef(null);
+  const userRef = useRef(null);
+
+  const activeCompany = getActiveCompany();
+
+  // Dark mode
+  useEffect(() => {
+    document.body.classList.toggle('dark', dark);
+  }, [dark]);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (companyRef.current && !companyRef.current.contains(e.target)) setCompanyDdOpen(false);
+      if (userRef.current && !userRef.current.contains(e.target)) setUserDdOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleLogout = async () => {
+    try { await authApi.logout({}); } catch {}
+    logout();
+    navigate('/login');
+    toast.success('Logged out successfully');
+  };
+
+  const Sidebar = ({ mobile = false }) => (
+    <aside style={{
+      width: 256, flexShrink: 0, height: '100vh', background: 'var(--surface)',
+      borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column',
+      position: mobile ? 'fixed' : 'sticky', top: 0, left: mobile ? 0 : 'auto',
+      zIndex: mobile ? 200 : 'auto', boxShadow: mobile ? 'var(--shadow-lg)' : 'none',
+      overflowY: 'auto', overflowX: 'hidden',
+    }}>
+      {/* Logo */}
+      <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 34, height: 34, background: 'var(--blue)', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 11, color: '#fff' }}>SCA</div>
+          <div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 15, color: 'var(--text)' }}>Smart<span style={{ color: 'var(--accent)' }}>CA</span>.ai</div>
+            <div style={{ fontSize: 10, color: 'var(--text3)' }}>AI-Powered ERP</div>
+          </div>
+        </div>
+        {mobile && <button className="btn btn-ghost btn-icon" onClick={() => setSidebarOpen(false)}><X size={18} /></button>}
+      </div>
+
+      {/* Company switcher */}
+      <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', position: 'relative' }} ref={companyRef}>
+        <button onClick={() => setCompanyDdOpen(v => !v)} style={{ width: '100%', background: 'var(--blue-light)', border: '1px solid var(--border-strong)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', textAlign: 'left' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text3)', marginBottom: 3 }}>Active Company</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeCompany?.name || 'Select Company'}</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, color: 'var(--blue)' }}>⭐ {activeCompany?.plan || 'Trial'}</span>
+            <ChevronDown size={14} style={{ color: 'var(--text3)', transform: companyDdOpen ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+          </div>
+        </button>
+        {companyDdOpen && (
+          <div style={{ position: 'absolute', top: '100%', left: 14, right: 14, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: 'var(--shadow-md)', zIndex: 100, padding: 6, marginTop: 4 }}>
+            {user?.companies?.map((c, i) => (
+              <button key={c.id} onClick={() => { setActiveCompany(c.id); setCompanyDdOpen(false); toast.success(`Switched to ${c.name}`); }}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', borderRadius: 7, border: 'none', cursor: 'pointer', background: c.id === activeCompanyId ? 'var(--blue-light)' : 'transparent', textAlign: 'left' }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: ['#2563eb','#059669','#d97706'][i % 3], flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: c.id === activeCompanyId ? 600 : 400 }}>{c.name}</span>
+              </button>
+            ))}
+            <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+            <button onClick={() => { navigate('/settings'); setCompanyDdOpen(false); }} style={{ width: '100%', padding: '9px 10px', borderRadius: 7, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--blue)', fontWeight: 600, fontSize: 13, textAlign: 'left' }}>
+              + Add Company
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Navigation */}
+      <nav style={{ flex: 1, padding: '10px 10px', overflowY: 'auto' }}>
+        {NAV.map((item, i) => {
+          if (item.section) return (
+            <div key={i} style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text3)', padding: '12px 10px 4px' }}>{item.section}</div>
+          );
+          const Icon = item.icon;
+          const active = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+          return (
+            <div key={item.path} className={`sb-item ${active ? 'active' : ''}`} onClick={() => { navigate(item.path); if (mobile) setSidebarOpen(false); }}>
+              <Icon size={16} />
+              <span style={{ flex: 1 }}>{item.label}</span>
+              {item.badge && <span className="sb-badge">{item.badge}</span>}
+            </div>
+          );
+        })}
+      </nav>
+
+      {/* User at bottom */}
+      <div style={{ padding: '12px 14px', borderTop: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'var(--blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+            {user?.firstName?.[0]}{user?.lastName?.[0]}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.firstName} {user?.lastName}</div>
+            <div style={{ fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email}</div>
+          </div>
+          <button className="btn btn-ghost btn-icon" onClick={handleLogout} title="Logout"><LogOut size={15} /></button>
+        </div>
+      </div>
+    </aside>
+  );
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      {/* Desktop Sidebar */}
+      <div className="hide-mobile"><Sidebar /></div>
+
+      {/* Mobile Sidebar Overlay */}
+      {sidebarOpen && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 199 }} onClick={() => setSidebarOpen(false)} />
+          <Sidebar mobile />
+        </>
+      )}
+
+      {/* Main content */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {/* Header */}
+        <header style={{ height: 62, background: 'var(--surface)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', padding: '0 20px', gap: 12, position: 'sticky', top: 0, zIndex: 100 }}>
+          <button className="btn btn-ghost btn-icon" style={{ display: 'flex' }} onClick={() => setSidebarOpen(true)}><Menu size={20} /></button>
+
+          {/* Search */}
+          <div style={{ flex: 1, maxWidth: 420, position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)', pointerEvents: 'none' }} />
+            <input style={{ width: '100%', paddingLeft: 36, paddingRight: 12, height: 36, border: '1.5px solid var(--border)', borderRadius: 9, fontSize: 13, background: 'var(--bg)', color: 'var(--text)', outline: 'none' }}
+              placeholder="Search vouchers, ledgers, parties… (Ctrl+K)" />
+          </div>
+
+          <div style={{ flex: 1 }} />
+
+          {/* Actions */}
+          <button className="btn btn-ghost btn-icon" onClick={() => setDark(v => !v)} title="Toggle dark mode">
+            {dark ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <button className="btn btn-ghost btn-icon" style={{ position: 'relative' }}>
+            <Bell size={18} />
+            <span style={{ position: 'absolute', top: 6, right: 6, width: 8, height: 8, background: 'var(--danger)', borderRadius: '50%', border: '2px solid var(--surface)' }} />
+          </button>
+
+          {/* AI button */}
+          <button className="btn btn-primary btn-sm" onClick={() => setAiOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Cpu size={14} /> AI Assistant
+          </button>
+        </header>
+
+        {/* AI Assistant floating panel */}
+        {aiOpen && <AIAssistant onClose={() => setAiOpen(false)} />}
+
+        {/* Page content */}
+        <main style={{ flex: 1, padding: 24, overflowY: 'auto' }}>
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}
