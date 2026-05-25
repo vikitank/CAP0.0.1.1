@@ -1,0 +1,109 @@
+// GSTPage.jsx
+import { useState } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { reportApi, gstApi } from '../services/api';
+import { format } from 'date-fns';
+import toast from 'react-hot-toast';
+
+const fmt = (n) => new Intl.NumberFormat('en-IN', { style:'currency', currency:'INR', maximumFractionDigits:2 }).format(n||0);
+
+export default function GSTPage() {
+  const [tab, setTab] = useState('summary');
+  const now = new Date();
+  const [period, setPeriod] = useState(`${String(now.getMonth()+1).padStart(2,'0')}${now.getFullYear()}`);
+
+  const { data: summary, isLoading } = useQuery({
+    queryKey: ['gst-summary'],
+    queryFn: () => reportApi.gstSummary({}).then(r => r.data),
+    enabled: tab === 'summary',
+  });
+
+  const { data: returns = [] } = useQuery({
+    queryKey: ['gst-returns'],
+    queryFn: () => gstApi.returns().then(r => r.data),
+    enabled: tab === 'returns',
+  });
+
+  const genMutation = useMutation({
+    mutationFn: (data) => gstApi.generate(data),
+    onSuccess: () => toast.success('GSTR-1 generated successfully!'),
+    onError: (e) => toast.error(e.response?.data?.error || 'Failed to generate return'),
+  });
+
+  return (
+    <div className="fade-in">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+        <div><h1 className="page-title">GST & Taxes</h1><p className="page-sub">GST returns, e-Invoice, e-Way Bill</p></div>
+        <button className="btn btn-primary btn-sm" onClick={() => genMutation.mutate({ type:'GSTR1', period })}>Generate GSTR-1</button>
+      </div>
+
+      <div style={{ display:'flex', gap:4, background:'var(--bg)', borderRadius:10, padding:4, marginBottom:20, width:'fit-content' }}>
+        {[['summary','GST Summary'],['returns','Returns History'],['einvoice','e-Invoice'],['eway','e-Way Bill']].map(([val,lbl]) => (
+          <button key={val} onClick={() => setTab(val)} style={{ padding:'8px 16px', borderRadius:8, border:'none', fontSize:13, fontWeight:600, cursor:'pointer', background:tab===val?'var(--surface)':'transparent', color:tab===val?'var(--blue)':'var(--text3)', boxShadow:tab===val?'var(--shadow)':'none' }}>{lbl}</button>
+        ))}
+      </div>
+
+      {tab === 'summary' && (
+        <div>
+          {summary && (
+            <>
+              <div className="grid3" style={{ marginBottom:20 }}>
+                <div className="card" style={{ borderLeft:'4px solid var(--success)' }}>
+                  <div style={{ fontSize:12, color:'var(--text3)', marginBottom:8 }}>Output GST (Sales)</div>
+                  <div style={{ fontSize:22, fontWeight:700, color:'var(--success)', marginBottom:8 }}>{fmt((summary.outward?.cgst||0)+(summary.outward?.sgst||0)+(summary.outward?.igst||0))}</div>
+                  <div style={{ fontSize:12, color:'var(--text2)' }}>CGST: {fmt(summary.outward?.cgst)} | SGST: {fmt(summary.outward?.sgst)}</div>
+                  <div style={{ fontSize:12, color:'var(--text2)' }}>IGST: {fmt(summary.outward?.igst)}</div>
+                </div>
+                <div className="card" style={{ borderLeft:'4px solid var(--info)' }}>
+                  <div style={{ fontSize:12, color:'var(--text3)', marginBottom:8 }}>Input GST (Purchases)</div>
+                  <div style={{ fontSize:22, fontWeight:700, color:'var(--info)', marginBottom:8 }}>{fmt((summary.inward?.cgst||0)+(summary.inward?.sgst||0)+(summary.inward?.igst||0))}</div>
+                  <div style={{ fontSize:12, color:'var(--text2)' }}>CGST: {fmt(summary.inward?.cgst)} | SGST: {fmt(summary.inward?.sgst)}</div>
+                  <div style={{ fontSize:12, color:'var(--text2)' }}>IGST: {fmt(summary.inward?.igst)}</div>
+                </div>
+                <div className="card" style={{ borderLeft:`4px solid ${(summary.netPayable?.total||0)>0?'var(--danger)':'var(--success)'}` }}>
+                  <div style={{ fontSize:12, color:'var(--text3)', marginBottom:8 }}>Net GST Payable</div>
+                  <div style={{ fontSize:22, fontWeight:700, color:(summary.netPayable?.total||0)>0?'var(--danger)':'var(--success)', marginBottom:8 }}>{fmt(Math.abs(summary.netPayable?.total||0))}</div>
+                  <div style={{ fontSize:12, color:'var(--text2)' }}>{(summary.netPayable?.total||0)>0?'⚠ Payable to Govt':'✓ Refund Applicable'}</div>
+                </div>
+              </div>
+              <div className="card">
+                <div className="card-title" style={{marginBottom:16}}>Return Filing Status</div>
+                {[['GSTR-1', 'Outward supplies details', '📤'],['GSTR-3B', 'Monthly summary return', '📋'],['GSTR-2A', 'Auto-drafted inward supplies', '📥']].map(([name, desc, icon]) => (
+                  <div key={name} style={{ display:'flex', alignItems:'center', gap:14, padding:'14px 0', borderBottom:'1px solid var(--border)' }}>
+                    <div style={{ fontSize:24 }}>{icon}</div>
+                    <div style={{ flex:1 }}><div style={{ fontWeight:600, color:'var(--text)' }}>{name}</div><div style={{ fontSize:12, color:'var(--text3)' }}>{desc}</div></div>
+                    <span className="badge badge-warn">Pending</span>
+                    <button className="btn btn-primary btn-sm">File Now</button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === 'returns' && (
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Return Type</th><th>Period</th><th>Filed On</th><th>ARN</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {returns.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><div className="empty-state-icon">📋</div><div className="empty-state-title">No returns filed yet</div></div></td></tr> :
+              returns.map(r => <tr key={r.id}><td className="td-bold">{r.type}</td><td>{r.period}</td><td>{r.filedAt ? format(new Date(r.filedAt),'dd MMM yyyy') : '—'}</td><td className="td-mono">{r.arn || '—'}</td><td><span className={`badge ${r.status==='Filed'?'badge-success':'badge-warn'}`}>{r.status}</span></td><td><button className="btn btn-secondary btn-sm">Download</button></td></tr>)}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(tab === 'einvoice' || tab === 'eway') && (
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-state-icon">{tab === 'einvoice' ? '🧾' : '🚚'}</div>
+            <div className="empty-state-title">{tab === 'einvoice' ? 'e-Invoice Generation' : 'e-Way Bill'}</div>
+            <div className="empty-state-sub">Connect GSTN API credentials in Settings to enable {tab === 'einvoice' ? 'e-Invoice IRN generation' : 'e-Way Bill generation'}</div>
+            <button className="btn btn-primary" style={{marginTop:16}}>Configure API →</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
