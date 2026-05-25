@@ -1,0 +1,52 @@
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { voucherApi, partyApi } from '../services/api';
+import { format } from 'date-fns';
+import { Plus, Download } from 'lucide-react';
+
+const fmt = (n) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
+
+export default function SalesPage() {
+  const [tab, setTab] = useState('sales');
+  const { data, isLoading } = useQuery({
+    queryKey: ['vouchers-sales', tab],
+    queryFn: () => voucherApi.list({ type: tab === 'sales' ? 'Sales' : 'Purchase' }).then(r => r.data),
+  });
+
+  return (
+    <div className="fade-in">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+        <div><h1 className="page-title">Sales & Purchase</h1><p className="page-sub">Manage invoices and purchase bills</p></div>
+        <div style={{ display:'flex', gap:10 }}>
+          <button className="btn btn-secondary btn-sm"><Download size={14}/> Export</button>
+          <button className="btn btn-primary btn-sm"><Plus size={14}/> New Invoice</button>
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:4, background:'var(--bg)', borderRadius:10, padding:4, marginBottom:20, width:'fit-content' }}>
+        {[['sales','Sales Invoices'],['purchase','Purchase Bills'],['parties','Parties']].map(([val,lbl]) => (
+          <button key={val} onClick={() => setTab(val)} style={{ padding:'8px 18px', borderRadius:8, border:'none', fontSize:13, fontWeight:600, cursor:'pointer', background:tab===val?'var(--surface)':'transparent', color:tab===val?'var(--blue)':'var(--text3)', boxShadow:tab===val?'var(--shadow)':'none' }}>{lbl}</button>
+        ))}
+      </div>
+      <div className="tbl-wrap">
+        <table>
+          <thead><tr><th>Invoice No</th><th>Date</th><th>Party</th><th>Taxable</th><th>GST</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>
+            {isLoading ? [1,2,3].map(i=><tr key={i}>{[80,70,120,80,70,80,60,70].map((w,j)=><td key={j}><div className="skeleton" style={{height:14,width:w}}/></td>)}</tr>) :
+            (data?.data || []).map(v => (
+              <tr key={v.id}>
+                <td><span style={{ fontFamily:'var(--mono)', color:'var(--blue)', fontSize:12 }}>{v.number}</span></td>
+                <td style={{ color:'var(--text2)' }}>{format(new Date(v.date),'dd MMM yyyy')}</td>
+                <td className="td-bold">{v.party?.name || '—'}</td>
+                <td className="td-mono">{fmt(v.totalAmount - v.taxAmount)}</td>
+                <td className="td-mono" style={{ color:'var(--warn)' }}>{fmt(v.taxAmount)}</td>
+                <td className="td-bold">{fmt(v.totalAmount)}</td>
+                <td><span className={`badge ${v.status==='Posted'?'badge-success':'badge-neutral'}`}>{v.status}</span></td>
+                <td><button className="btn btn-secondary btn-sm">View</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
