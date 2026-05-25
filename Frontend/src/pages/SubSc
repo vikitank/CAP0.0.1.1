@@ -1,0 +1,331 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { subscriptionApi } from '../services/api';
+import toast from 'react-hot-toast';
+import { format } from 'date-fns';
+import { Check, X, Loader2, Crown, Zap, Building2, Download } from 'lucide-react';
+
+const fmt = (n) => new Intl.NumberFormat('en-IN', { style:'currency', currency:'INR', maximumFractionDigits:0 }).format(n||0);
+
+const PLANS = [
+  {
+    id: 'Starter', icon: '🌱', color: '#059669', bg: '#ecfdf5',
+    prices: { Monthly: 999, Annual: 799 },
+    subtitle: 'Freelancers & small traders',
+    features: ['1 User', '1 Company', 'Accounting & Vouchers', 'GST Returns (GSTR-1, 3B)', 'Basic Reports', '100 Vouchers/month'],
+    missing: ['Multi-user', 'Payroll', 'Manufacturing', 'AI Features', 'e-Invoice'],
+  },
+  {
+    id: 'Professional', icon: '⭐', color: '#1e4fcc', bg: '#eff4ff', popular: true,
+    prices: { Monthly: 2499, Annual: 1999 },
+    subtitle: 'Growing SMBs & CA firms',
+    features: ['5 Users', '3 Companies', 'All Accounting Modules', 'GST + e-Invoice + e-Way', 'Payroll & HR', 'Inventory Management', 'AI Assistant (Basic)', '400+ Reports', 'Unlimited Vouchers'],
+    missing: ['Manufacturing', 'Priority Support'],
+  },
+  {
+    id: 'Enterprise', icon: '🏢', color: '#7c3aed', bg: '#fdf4ff',
+    prices: { Monthly: 5999, Annual: 4799 },
+    subtitle: 'Large businesses & CA firms',
+    features: ['Unlimited Users', 'Unlimited Companies', 'All Professional Features', 'Manufacturing Module', 'Full AI Suite + Voice', 'Custom Roles & Permissions', 'API Access', 'Priority Support (4hr SLA)', 'Dedicated Account Manager', 'Custom Branding'],
+    missing: [],
+  },
+];
+
+function loadRazorpay() {
+  return new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.body.appendChild(s);
+  });
+}
+
+export default function SubscriptionPage() {
+  const [billing, setBilling] = useState('Monthly');
+  const [paying, setPaying] = useState(null);
+  const qc = useQueryClient();
+
+  const { data: sub, isLoading } = useQuery({
+    queryKey: ['subscription'],
+    queryFn: () => subscriptionApi.get().then(r => r.data),
+  });
+
+  const verifyMutation = useMutation({
+    mutationFn: (data) => subscriptionApi.verifyPayment(data),
+    onSuccess: (res) => {
+      toast.success(res.data.message || 'Plan upgraded!');
+      qc.invalidateQueries(['subscription']);
+      setPaying(null);
+    },
+    onError: (e) => toast.error(e.response?.data?.error || 'Payment verification failed'),
+  });
+
+  const handleUpgrade = async (plan) => {
+    if (plan.id === sub?.plan) return;
+    setPaying(plan.id);
+
+    try {
+      // Step 1: Create order
+      const orderRes = await subscriptionApi.createOrder({ plan: plan.id, billingCycle: billing });
+      const order = orderRes.data;
+
+      // Demo mode - skip actual Razorpay
+      if (order.demo) {
+        await verifyMutation.mutateAsync({
+          orderId: order.orderId,
+          paymentId: `pay_demo_${Date.now()}`,
+          signature: 'demo_signature',
+          plan: plan.id,
+          billingCycle: billing,
+        });
+        return;
+      }
+
+      // Step 2: Load Razorpay
+      const loaded = await loadRazorpay();
+      if (!loaded) {
+        toast.error('Failed to load Razorpay. Check your internet connection.');
+        setPaying(null);
+        return;
+      }
+
+      // Step 3: Open Razorpay checkout
+      const options = {
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'SmartCA.ai',
+        description: `${plan.id} Plan - ${billing}`,
+        order_id: order.orderId,
+        prefill: {
+          name: '',  // pre-filled from auth store in real app
+          email: '',
+          contact: '',
+        },
+        theme: { color: '#1e4fcc' },
+        modal: {
+          ondismiss: () => { toast.error('Payment cancelled'); setPaying(null); }
+        },
+        handler: async (response) => {
+          // Step 4: Verify on backend
+          await verifyMutation.mutateAsync({
+            orderId: order.orderId,
+            paymentId: response.razorpay_payment_id,
+            signature: response.razorpay_signature,
+            plan: plan.id,
+            billingCycle: billing,
+          });
+        },
+      };
+
+      new window.Razorpay(options).open();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to initiate payment');
+      setPaying(null);
+    }
+  };
+
+  const cancelMutation = useMutation({
+    mutationFn: () => subscriptionApi.cancel(),
+    onSuccess: () => { toast.success('Subscription cancelled'); qc.invalidateQueries(['subscription']); },
+    onError: () => toast.error('Failed to cancel'),
+  });
+
+  const daysLeft = sub?.trialEndsAt
+    ? Math.max(0, Math.ceil((new Date(sub.trialEndsAt) - new Date()) / (1000 * 60 * 60 * 24)))
+    : 0;
+
+  return (
+    <div className="fade-in">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+        <div><h1 className="page-title">Subscription</h1><p className="page-sub">Manage your plan and billing</p></div>
+      </div>
+
+      {/* Current plan banner */}
+      {sub && (
+        <div style={{ background:'linear-gradient(135deg,#1338a8,#2563eb)', borderRadius:16, padding:'24px 28px', marginBottom:24, display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:16 }}>
+          <div>
+            <div style={{ fontSize:11, opacity:.7, marginBottom:4, color:'#fff', textTransform:'uppercase', letterSpacing:'.06em' }}>Current Plan</div>
+            <div style={{ fontFamily:'var(--font-display)', fontSize:26, fontWeight:800, color:'#fff' }}>
+              {sub.plan === 'Professional' ? '⭐' : sub.plan === 'Enterprise' ? '🏢' : '🌱'} {sub.plan}
+            </div>
+            <div style={{ fontSize:13, color:'rgba(255,255,255,.75)', marginTop:4 }}>
+              {sub.status === 'Trial'
+                ? `🎉 Trial: ${daysLeft} days remaining`
+                : `${sub.billingCycle} · ${fmt(sub.amount)}/month · Status: ${sub.status}`}
+            </div>
+          </div>
+          <div style={{ textAlign:'right' }}>
+            {sub.currentPeriodEnd && (
+              <div>
+                <div style={{ fontSize:11, opacity:.7, color:'#fff' }}>Next billing</div>
+                <div style={{ fontFamily:'var(--font-display)', fontSize:18, fontWeight:800, color:'#fff' }}>
+                  {format(new Date(sub.currentPeriodEnd), 'dd MMM yyyy')}
+                </div>
+              </div>
+            )}
+            {sub.status === 'Active' && (
+              <button onClick={() => { if (confirm('Cancel subscription? You will retain access until billing period ends.')) cancelMutation.mutate(); }}
+                style={{ background:'rgba(255,255,255,.15)', border:'1px solid rgba(255,255,255,.3)', color:'#fff', padding:'6px 14px', borderRadius:8, fontSize:12, cursor:'pointer', marginTop:8 }}>
+                Cancel Plan
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Billing toggle */}
+      <div style={{ textAlign:'center', marginBottom:24 }}>
+        <div style={{ display:'inline-flex', gap:4, background:'var(--surface2)', borderRadius:10, padding:4, border:'1px solid var(--border)' }}>
+          {['Monthly', 'Annual'].map(b => (
+            <button key={b} onClick={() => setBilling(b)} style={{ padding:'9px 22px', borderRadius:8, border:'none', fontSize:13, fontWeight:600, cursor:'pointer', background:billing===b?'var(--surface)':'transparent', color:billing===b?'var(--blue)':'var(--text3)', boxShadow:billing===b?'var(--shadow)':'none', transition:'all .15s' }}>
+              {b} {b==='Annual' && <span style={{ color:'var(--success)', fontWeight:700, fontSize:11 }}> SAVE 20%</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Plan cards */}
+      <div className="grid3" style={{ marginBottom:28 }}>
+        {PLANS.map(plan => {
+          const isCurrent = sub?.plan === plan.id;
+          const isUpgrade = !isCurrent;
+          const isPaying = paying === plan.id;
+
+          return (
+            <div key={plan.id} style={{ background:'var(--surface)', border: plan.popular ? `2px solid ${plan.color}` : '1px solid var(--border)', borderRadius:16, padding:'24px 20px', position:'relative', transition:'box-shadow .15s' }}
+              onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-md)'}
+              onMouseLeave={e => e.currentTarget.style.boxShadow = ''}>
+
+              {plan.popular && (
+                <div style={{ position:'absolute', top:-13, left:'50%', transform:'translateX(-50%)', background:plan.color, color:'#fff', padding:'3px 16px', borderRadius:99, fontSize:11, fontWeight:800, whiteSpace:'nowrap', letterSpacing:'.05em' }}>
+                  MOST POPULAR
+                </div>
+              )}
+              {isCurrent && (
+                <div style={{ position:'absolute', top:12, right:12, background:'var(--success-soft)', color:'var(--success)', padding:'2px 10px', borderRadius:99, fontSize:11, fontWeight:700 }}>
+                  Current
+                </div>
+              )}
+
+              <div style={{ fontSize:30, marginBottom:10 }}>{plan.icon}</div>
+              <div style={{ fontFamily:'var(--font-display)', fontSize:20, fontWeight:800, color:'var(--text)', marginBottom:4 }}>{plan.id}</div>
+              <div style={{ fontFamily:'var(--font-display)', fontSize:28, fontWeight:800, color:plan.color }}>
+                {fmt(plan.prices[billing])}
+                <span style={{ fontSize:13, fontWeight:400, color:'var(--text3)' }}>/month</span>
+              </div>
+              {billing === 'Annual' && (
+                <div style={{ fontSize:11, color:'var(--success)', fontWeight:600, marginTop:2 }}>
+                  Save {fmt((plan.prices.Monthly - plan.prices.Annual) * 12)}/year
+                </div>
+              )}
+              <div style={{ fontSize:12, color:'var(--text3)', margin:'8px 0 16px' }}>{plan.subtitle}</div>
+
+              <div style={{ borderTop:'1px solid var(--border)', paddingTop:16, marginBottom:20 }}>
+                {plan.features.map(f => (
+                  <div key={f} style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'5px 0', fontSize:13, color:'var(--text2)' }}>
+                    <Check size={14} style={{ color:'var(--success)', flexShrink:0, marginTop:1 }} />{f}
+                  </div>
+                ))}
+                {plan.missing.map(f => (
+                  <div key={f} style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'5px 0', fontSize:13, color:'var(--text3)' }}>
+                    <X size={14} style={{ flexShrink:0, marginTop:1 }} />{f}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={() => plan.id !== 'Enterprise' ? handleUpgrade(plan) : toast('Contact us at sales@smartca.ai')}
+                disabled={isCurrent || isPaying}
+                className={`btn btn-full ${isCurrent ? 'btn-success' : 'btn-primary'}`}
+                style={{ background: isCurrent ? 'var(--success)' : plan.color, borderColor: isCurrent ? 'var(--success)' : plan.color }}>
+                {isPaying ? (
+                  <><Loader2 size={15} style={{ animation:'spin .6s linear infinite' }} /> Processing...</>
+                ) : isCurrent ? (
+                  '✓ Current Plan'
+                ) : plan.id === 'Enterprise' ? (
+                  'Contact Sales →'
+                ) : (
+                  `Upgrade to ${plan.id} →`
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Feature comparison */}
+      <div className="card" style={{ marginBottom:24 }}>
+        <div className="card-title" style={{ marginBottom:16 }}>Full Feature Comparison</div>
+        <div className="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Feature</th>
+                <th style={{ textAlign:'center' }}>🌱 Starter</th>
+                <th style={{ textAlign:'center', background:'var(--blue-light)' }}>⭐ Professional</th>
+                <th style={{ textAlign:'center' }}>🏢 Enterprise</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                ['Users', '1', '5', 'Unlimited'],
+                ['Companies', '1', '3', 'Unlimited'],
+                ['Voucher Entry', '✓', '✓', '✓'],
+                ['GST Returns', '✓', '✓', '✓'],
+                ['e-Invoice & e-Way', '✗', '✓', '✓'],
+                ['Payroll & HR', '✗', '✓', '✓'],
+                ['Inventory', '✗', '✓', '✓'],
+                ['AI Assistant', '✗', 'Basic', 'Full Suite'],
+                ['Manufacturing', '✗', '✗', '✓'],
+                ['API Access', '✗', '✗', '✓'],
+                ['Support', 'Email', 'Priority', '4hr SLA'],
+                ['Custom Branding', '✗', '✗', '✓'],
+              ].map(([feat, s, p, e]) => (
+                <tr key={feat}>
+                  <td className="td-bold">{feat}</td>
+                  {[s, p, e].map((v, i) => (
+                    <td key={i} style={{ textAlign:'center', background: i===1 ? 'rgba(30,79,204,.03)' : 'transparent', color: v==='✗' ? 'var(--text3)' : v==='✓' ? 'var(--success)' : 'var(--text)', fontWeight: v==='✓'||v==='✗' ? 700 : 400 }}>
+                      {v}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Billing history */}
+      {sub?.invoices?.length > 0 && (
+        <div className="card">
+          <div className="card-title" style={{ marginBottom:16 }}>Billing History</div>
+          <div className="tbl-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Plan</th><th>Amount</th><th>GST (18%)</th><th>Total</th><th>Status</th><th>Invoice</th></tr></thead>
+              <tbody>
+                {sub.invoices.map(inv => (
+                  <tr key={inv.id}>
+                    <td style={{ color:'var(--text2)' }}>{format(new Date(inv.createdAt), 'dd MMM yyyy')}</td>
+                    <td className="td-bold">{sub.plan} Plan</td>
+                    <td className="td-mono">{fmt(inv.amount)}</td>
+                    <td className="td-mono">{fmt(inv.gst)}</td>
+                    <td className="td-bold">{fmt(inv.total)}</td>
+                    <td><span className={`badge ${inv.status==='Paid'?'badge-success':'badge-danger'}`}>{inv.status}</span></td>
+                    <td>
+                      <button className="btn btn-ghost btn-sm" style={{ gap:4 }}>
+                        <Download size={12} /> PDF
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
