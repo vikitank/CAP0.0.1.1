@@ -1,0 +1,399 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { voucherApi, ledgerApi, partyApi, itemApi } from '../services/api';
+import { useForm, useFieldArray } from 'react-hook-form';
+import toast from 'react-hot-toast';
+import { format } from 'date-fns';
+import { Plus, Trash2, Save, ArrowLeft, Loader2, Search } from 'lucide-react';
+
+const VOUCHER_TYPES = [
+  { id: 'Sales',      icon: '🧾', name: 'Sales Invoice',    key: 'F8',       color: '#059669', bg: '#ecfdf5', desc: 'Customer ko maal ya service becha', gst: true,  dr: 'Sundry Debtors', cr: 'Sales Account' },
+  { id: 'Purchase',   icon: '🛒', name: 'Purchase Bill',    key: 'F9',       color: '#dc2626', bg: '#fef2f2', desc: 'Vendor se maal ya service kharida', gst: true,  dr: 'Purchase Account', cr: 'Sundry Creditors' },
+  { id: 'Receipt',    icon: '💰', name: 'Receipt',          key: 'F6',       color: '#0284c7', bg: '#f0f9ff', desc: 'Customer se paisa mila', gst: false, dr: 'Cash/Bank', cr: 'Sundry Debtors' },
+  { id: 'Payment',    icon: '💸', name: 'Payment',          key: 'F5',       color: '#d97706', bg: '#fffbeb', desc: 'Vendor ko paisa diya', gst: false, dr: 'Sundry Creditors', cr: 'Cash/Bank' },
+  { id: 'Journal',    icon: '📔', name: 'Journal',          key: 'F7',       color: '#475569', bg: '#f8fafc', desc: 'Adjustment / depreciation / provision', gst: false, dr: 'Any Ledger', cr: 'Any Ledger' },
+  { id: 'Contra',     icon: '🔄', name: 'Contra',           key: 'F4',       color: '#7c3aed', bg: '#fdf4ff', desc: 'Cash ↔ Bank internal transfer', gst: false, dr: 'Bank/Cash', cr: 'Bank/Cash' },
+  { id: 'DebitNote',  icon: '📤', name: 'Debit Note',       key: 'Ctrl+F9',  color: '#b91c1c', bg: '#fff1f2', desc: 'Purchase return / vendor credit', gst: true,  dr: 'Sundry Creditors', cr: 'Purchase Return' },
+  { id: 'CreditNote', icon: '📥', name: 'Credit Note',      key: 'Ctrl+F8',  color: '#059669', bg: '#f0fdf4', desc: 'Sales return / customer credit', gst: true,  dr: 'Sales Return', cr: 'Sundry Debtors' },
+];
+
+const fmt = (n) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n || 0);
+
+// ─── Voucher List 
+function VoucherList({ onNew }) {
+  const [filters, setFilters] = useState({ type: '', status: '', page: 1 });
+  const { data, isLoading } = useQuery({
+    queryKey: ['vouchers', filters],
+    queryFn: () => voucherApi.list(filters).then(r => r.data),
+  });
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <h1 className="page-title">Voucher Entry</h1>
+          <p className="page-sub">All accounting entries in one place</p>
+        </div>
+        <button className="btn btn-primary" onClick={onNew}><Plus size={15} /> New Voucher</button>
+      </div>
+
+      {/* Filters */}
+      <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <select className="form-input" style={{ width: 160 }} value={filters.type} onChange={e => setFilters(f => ({ ...f, type: e.target.value, page: 1 }))}>
+            <option value="">All Types</option>
+            {VOUCHER_TYPES.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <select className="form-input" style={{ width: 140 }} value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value, page: 1 }))}>
+            <option value="">All Status</option>
+            <option value="Posted">Posted</option>
+            <option value="Draft">Draft</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
+          <input type="date" className="form-input" style={{ width: 150 }} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} />
+          <input type="date" className="form-input" style={{ width: 150 }} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} />
+          <div className="input-wrap" style={{ flex: 1, minWidth: 180 }}>
+            <Search size={14} className="input-icon" />
+            <input className="form-input" placeholder="Search vouchers..." />
+          </div>
+        </div>
+      </div>
+
+      <div className="tbl-wrap">
+        <table>
+          <thead>
+            <tr><th>Voucher No</th><th>Date</th><th>Type</th><th>Party</th><th>Amount</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              [1,2,3,4,5].map(i => (
+                <tr key={i}>
+                  {[100,80,70,120,80,60,70].map((w,j) => <td key={j}><div className="skeleton" style={{ height: 14, width: w }} /></td>)}
+                </tr>
+              ))
+            ) : data?.data?.length > 0 ? (
+              data.data.map(v => {
+                const vt = VOUCHER_TYPES.find(t => t.id === v.type);
+                return (
+                  <tr key={v.id}>
+                    <td><span className="td-mono" style={{ color: 'var(--blue)' }}>{v.number}</span></td>
+                    <td style={{ color: 'var(--text2)' }}>{format(new Date(v.date), 'dd MMM yyyy')}</td>
+                    <td>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700, background: vt?.bg, color: vt?.color }}>
+                        {vt?.icon} {v.type}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--text2)' }}>{v.party?.name || '—'}</td>
+                    <td className="td-bold">{fmt(v.totalAmount)}</td>
+                    <td>
+                      <span className={`badge ${v.status === 'Posted' ? 'badge-success' : v.status === 'Cancelled' ? 'badge-danger' : 'badge-neutral'}`}>{v.status}</span>
+                    </td>
+                    <td><button className="btn btn-secondary btn-sm">View</button></td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr><td colSpan={7}>
+                <div className="empty-state">
+                  <div className="empty-state-icon">📋</div>
+                  <div className="empty-state-title">No vouchers found</div>
+                  <div className="empty-state-sub">Create your first voucher to get started</div>
+                </div>
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {data?.pagination && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, fontSize: 13, color: 'var(--text2)' }}>
+          <span>Showing {((filters.page - 1) * 20) + 1}–{Math.min(filters.page * 20, data.pagination.total)} of {data.pagination.total}</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn btn-secondary btn-sm" disabled={filters.page === 1} onClick={() => setFilters(f => ({ ...f, page: f.page - 1 }))}>← Prev</button>
+            <button className="btn btn-secondary btn-sm" disabled={filters.page >= data.pagination.pages} onClick={() => setFilters(f => ({ ...f, page: f.page + 1 }))}>Next →</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Voucher Type Selector 
+function VoucherTypeSelector({ onSelect }) {
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <h1 className="page-title">New Voucher</h1>
+        <p className="page-sub">Select voucher type to create</p>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+        {VOUCHER_TYPES.map(vt => (
+          <div key={vt.id} onClick={() => onSelect(vt)}
+            style={{ background: vt.bg, border: `2px solid transparent`, borderRadius: 14, padding: '18px 20px', cursor: 'pointer', transition: 'all .15s', position: 'relative' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = vt.color; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,.1)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.boxShadow = ''; e.currentTarget.style.transform = ''; }}>
+            <div style={{ position: 'absolute', top: 12, right: 12, background: `${vt.color}22`, color: vt.color, padding: '2px 8px', borderRadius: 99, fontSize: 10, fontWeight: 700 }}>{vt.key}</div>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>{vt.icon}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: vt.color, marginBottom: 4 }}>{vt.name}</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>{vt.desc}</div>
+            <div style={{ fontSize: 11, color: vt.color, opacity: .8 }}>Dr: {vt.dr}<br />Cr: {vt.cr}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Voucher Form ─────────────────────────────────────────────────────────────
+function VoucherForm({ voucherType, onBack, onSaved }) {
+  const queryClient = useQueryClient();
+  const { register, handleSubmit, watch, setValue, control, formState: { errors } } = useForm({
+    defaultValues: {
+      date: format(new Date(), 'yyyy-MM-dd'),
+      lines: [
+        { ledgerId: '', type: 'Dr', amount: '', narration: '' },
+        { ledgerId: '', type: 'Cr', amount: '', narration: '' },
+      ],
+      items: [],
+    }
+  });
+  const { fields: lineFields, append: appendLine, remove: removeLine } = useFieldArray({ control, name: 'lines' });
+  const { fields: itemFields, append: appendItem, remove: removeItem } = useFieldArray({ control, name: 'items' });
+  const lines = watch('lines');
+
+  const { data: nextNum } = useQuery({
+    queryKey: ['next-voucher-number', voucherType.id],
+    queryFn: () => voucherApi.nextNumber(voucherType.id).then(r => r.data.number),
+  });
+
+  const { data: ledgers = [] } = useQuery({
+    queryKey: ['ledgers'],
+    queryFn: () => ledgerApi.list({}).then(r => r.data),
+  });
+
+  const { data: parties = [] } = useQuery({
+    queryKey: ['parties'],
+    queryFn: () => partyApi.list({}).then(r => r.data),
+  });
+
+  const { data: items = [] } = useQuery({
+    queryKey: ['items'],
+    queryFn: () => itemApi.list({}).then(r => r.data),
+    enabled: voucherType.gst,
+  });
+
+  // Balance check
+  const totalDr = lines.reduce((s, l) => l.type === 'Dr' ? s + (parseFloat(l.amount) || 0) : s, 0);
+  const totalCr = lines.reduce((s, l) => l.type === 'Cr' ? s + (parseFloat(l.amount) || 0) : s, 0);
+  const isBalanced = totalDr > 0 && Math.abs(totalDr - totalCr) < 0.01;
+
+  const mutation = useMutation({
+    mutationFn: (data) => voucherApi.create(data),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries(['vouchers']);
+      queryClient.invalidateQueries(['dashboard']);
+      toast.success(`✓ ${voucherType.name} ${res.data.number} saved!`);
+      onSaved();
+    },
+    onError: (err) => toast.error(err.response?.data?.error || 'Failed to save voucher'),
+  });
+
+  const onSubmit = (data) => {
+    // Recalculate GST on each item before submitting (form doesn't store computed values)
+    const processedItems = (data.items || []).map(item => {
+      const qty  = parseFloat(item.quantity) || 0;
+      const rate = parseFloat(item.rate) || 0;
+      const taxRate = parseFloat(item.taxRate) || 0;
+      const taxable = qty * rate;
+      const cgst = taxable * taxRate / 200;
+      const sgst = taxable * taxRate / 200;
+      const amount = taxable + cgst + sgst;
+      return { ...item, cgst, sgst, igst: 0, amount };
+    });
+    mutation.mutate({ ...data, type: voucherType.id, items: processedItems });
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
+        <button type="button" className="btn btn-ghost btn-icon" onClick={onBack}><ArrowLeft size={18} /></button>
+        <div style={{ background: voucherType.bg, borderRadius: 12, padding: '6px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 22 }}>{voucherType.icon}</span>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: voucherType.color }}>{voucherType.name}</div>
+            <div style={{ fontSize: 11, color: '#64748b' }}>{voucherType.desc}</div>
+          </div>
+        </div>
+        <div style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 15, fontWeight: 600, color: voucherType.color }}>
+          {nextNum || '...'}
+        </div>
+      </div>
+
+      {/* Basic fields */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="form-row-3">
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Date</label>
+            <input type="date" className="form-input" {...register('date', { required: true })} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Party / Name</label>
+            <select className="form-input" {...register('partyId')}>
+              <option value="">Select party (optional)</option>
+              {parties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Reference / Narration</label>
+            <input className="form-input" placeholder="Bill no, cheque no, etc." {...register('narration')} />
+          </div>
+        </div>
+      </div>
+
+      {/* GST Items (for Sales/Purchase) */}
+      {voucherType.gst && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+            <div className="card-title" style={{ marginBottom: 0 }}>Items / Services</div>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => appendItem({ itemId: '', description: '', quantity: 1, rate: '', taxRate: 18, cgst: 0, sgst: 0, igst: 0, amount: 0 })}>
+              <Plus size={13} /> Add Item
+            </button>
+          </div>
+          {itemFields.length > 0 ? (
+            <div className="tbl-wrap">
+              <table>
+                <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>GST%</th><th>CGST</th><th>SGST</th><th>Amount</th><th></th></tr></thead>
+                <tbody>
+                  {itemFields.map((field, i) => {
+                    const qty = parseFloat(watch(`items.${i}.quantity`)) || 0;
+                    const rate = parseFloat(watch(`items.${i}.rate`)) || 0;
+                    const taxRate = parseFloat(watch(`items.${i}.taxRate`)) || 0;
+                    const taxable = qty * rate;
+                    const cgst = taxable * taxRate / 200;
+                    const sgst = taxable * taxRate / 200;
+                    const amount = taxable + cgst + sgst;
+                    return (
+                      <tr key={field.id}>
+                        <td style={{ minWidth: 160 }}>
+                          <select className="form-input" style={{ padding: '5px 8px' }} {...register(`items.${i}.itemId`, { required: true })}>
+                            <option value="">Select item</option>
+                            {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+                          </select>
+                        </td>
+                        <td style={{ width: 70 }}><input type="number" className="form-input" style={{ padding: '5px 8px', textAlign: 'center' }} defaultValue={1} {...register(`items.${i}.quantity`)} /></td>
+                        <td style={{ width: 100 }}><input type="number" className="form-input" style={{ padding: '5px 8px' }} placeholder="Rate" {...register(`items.${i}.rate`)} /></td>
+                        <td style={{ width: 80 }}>
+                          <select className="form-input" style={{ padding: '5px 8px' }} {...register(`items.${i}.taxRate`)}>
+                            <option value={0}>0%</option><option value={5}>5%</option><option value={12}>12%</option><option value={18}>18%</option><option value={28}>28%</option>
+                          </select>
+                        </td>
+                        <td style={{ width: 90, color: 'var(--text2)', fontSize: 12 }}>₹{cgst.toFixed(2)}</td>
+                        <td style={{ width: 90, color: 'var(--text2)', fontSize: 12 }}>₹{sgst.toFixed(2)}</td>
+                        <td style={{ fontWeight: 700, width: 100 }}>₹{amount.toFixed(2)}</td>
+                        <td><button type="button" onClick={() => removeItem(i)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}><Trash2 size={14} /></button></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text3)', fontSize: 13 }}>
+              Click "Add Item" to add items/services
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Ledger Lines (Dr/Cr) */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div className="card-title" style={{ marginBottom: 0 }}>Ledger Entries (Dr / Cr)</div>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => appendLine({ ledgerId: '', type: 'Dr', amount: '', narration: '' })}>
+            <Plus size={13} /> Add Line
+          </button>
+        </div>
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Ledger</th><th width={80}>Dr / Cr</th><th width={130}>Amount (₹)</th><th>Narration</th><th width={40}></th></tr></thead>
+            <tbody>
+              {lineFields.map((field, i) => (
+                <tr key={field.id}>
+                  <td>
+                    <select className={`form-input ${errors.lines?.[i]?.ledgerId ? 'error' : ''}`} style={{ padding: '6px 10px', fontSize: 13 }} {...register(`lines.${i}.ledgerId`, { required: true })}>
+                      <option value="">— Select ledger —</option>
+                      {ledgers.map(l => <option key={l.id} value={l.id}>{l.name} ({l.group?.name})</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <select className="form-input" style={{ padding: '6px 10px', fontSize: 13 }} {...register(`lines.${i}.type`)}>
+                      <option value="Dr">Dr</option>
+                      <option value="Cr">Cr</option>
+                    </select>
+                  </td>
+                  <td>
+                    <input type="number" className="form-input" style={{ padding: '6px 10px', textAlign: 'right' }} placeholder="0.00" {...register(`lines.${i}.amount`, { required: true, min: 0.01 })} />
+                  </td>
+                  <td>
+                    <input className="form-input" style={{ padding: '6px 10px', fontSize: 13 }} placeholder="Narration (optional)" {...register(`lines.${i}.narration`)} />
+                  </td>
+                  <td>
+                    {lineFields.length > 2 && (
+                      <button type="button" onClick={() => removeLine(i)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 4 }}><Trash2 size={15} /></button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Balance indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, padding: '10px 14px', borderRadius: 9, background: isBalanced ? 'var(--success-soft)' : totalDr === 0 ? 'var(--surface2)' : 'var(--danger-soft)', border: `1px solid ${isBalanced ? 'rgba(5,150,105,.2)' : totalDr === 0 ? 'var(--border)' : 'rgba(220,38,38,.2)'}` }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: isBalanced ? 'var(--success)' : totalDr === 0 ? 'var(--text3)' : 'var(--danger)' }}>
+            {isBalanced ? `✓ Balanced — Dr = Cr = ${fmt(totalDr)}` : totalDr === 0 ? 'Amount enter karein…' : `⚠ Imbalanced — Dr ${fmt(totalDr)} ≠ Cr ${fmt(totalCr)}`}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+            <span>Dr: <strong>{fmt(totalDr)}</strong></span>
+            <span style={{ margin: '0 10px' }}>|</span>
+            <span>Cr: <strong>{fmt(totalCr)}</strong></span>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer actions */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
+        <button type="button" className="btn btn-secondary" onClick={onBack}>Cancel</button>
+        <button type="submit" className="btn btn-secondary" name="draft" disabled={mutation.isPending}>Save as Draft</button>
+        <button type="submit" className="btn btn-primary" disabled={mutation.isPending || !isBalanced}>
+          {mutation.isPending ? <Loader2 size={15} style={{ animation: 'spin .6s linear infinite' }} /> : <Save size={15} />}
+          {mutation.isPending ? 'Saving...' : 'Save & Post'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ─── Main Page 
+export default function VouchersPage() {
+  const [view, setView] = useState('list');   // list | select | form
+  const [selectedType, setSelectedType] = useState(null);
+
+  // Keyboard shortcut
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.altKey && e.key === 'n') { e.preventDefault(); setView('select'); }
+      if (e.key === 'Escape' && view !== 'list') setView(view === 'form' ? 'select' : 'list');
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [view]);
+
+  if (view === 'list') return <VoucherList onNew={() => setView('select')} />;
+  if (view === 'select') return <VoucherTypeSelector onSelect={(vt) => { setSelectedType(vt); setView('form'); }} />;
+  if (view === 'form') return (
+    <VoucherForm voucherType={selectedType} onBack={() => setView('select')} onSaved={() => setView('list')} />
+  );
+}
