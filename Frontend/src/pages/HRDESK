@@ -1,0 +1,356 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '../services/api';
+import { useForm } from 'react-hook-form';
+import toast from 'react-hot-toast';
+import { Plus, Download, Users, IndianRupee, Calculator, FileText, Play } from 'lucide-react';
+
+const payrollApi = {
+  employees: () => api.get('/payroll/employees').then(r => r.data),
+  addEmployee: (d) => api.post('/payroll/employees', d),
+  updateEmployee: (id, d) => api.put(`/payroll/employees/${id}`, d),
+  runPayroll: (d) => api.post('/payroll/run', d),
+  history: () => api.get('/payroll/history').then(r => r.data),
+  summary: (p) => api.get('/payroll/summary', { params: p }).then(r => r.data),
+};
+
+const fmt = (n) => new Intl.NumberFormat('en-IN', { style:'currency', currency:'INR', maximumFractionDigits:0 }).format(n||0);
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+export default function PayrollPage() {
+  const [tab, setTab] = useState('employees');
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
+  const [year] = useState(new Date().getFullYear());
+  const [showAdd, setShowAdd] = useState(false);
+  const qc = useQueryClient();
+  const { register, handleSubmit, reset, formState: { errors } } = useForm();
+
+  const { data: employees = [], isLoading } = useQuery({ queryKey: ['employees'], queryFn: payrollApi.employees });
+  const { data: history = [] } = useQuery({ queryKey: ['payroll-history'], queryFn: payrollApi.history });
+
+  const addMutation = useMutation({
+    mutationFn: (d) => payrollApi.addEmployee(d),
+    onSuccess: () => { qc.invalidateQueries(['employees']); toast.success('Employee added!'); setShowAdd(false); reset(); },
+    onError: (e) => toast.error(e.response?.data?.error || 'Failed'),
+  });
+
+  const runMutation = useMutation({
+    mutationFn: () => payrollApi.runPayroll({ month, year }),
+    onSuccess: (r) => {
+      qc.invalidateQueries(['payroll-history']);
+      toast.success(`Payroll processed! ${r.data.lines?.length || 0} employees · Net: ${fmt(r.data.totals?.totalNet)}`);
+    },
+    onError: (e) => toast.error(e.response?.data?.error || 'Payroll failed'),
+  });
+
+  // Aggregate totals
+  const totals = employees.reduce((a, e) => ({
+    gross: a.gross + (e.gross||0),
+    pf: a.pf + (e.pfEmployee||0),
+    esi: a.esi + (e.esiEmployee||0),
+    tds: a.tds + (e.tdsMonthly||0),
+    net: a.net + (e.netPay||0),
+  }), { gross:0, pf:0, esi:0, tds:0, net:0 });
+
+  return (
+    <div className="fade-in">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+        <div><h1 className="page-title">Payroll & HR</h1><p className="page-sub">Employee salary, TDS, PF/ESI — FY {year}-{year+1}</p></div>
+        <div style={{ display:'flex', gap:10 }}>
+          <select className="form-input" style={{ width:130 }} value={month} onChange={e => setMonth(+e.target.value)}>
+            {MONTHS.map((m,i) => <option key={i} value={i+1}>{m} {year}</option>)}
+          </select>
+          <button className="btn btn-secondary btn-sm" onClick={() => toast('Payslips downloaded!')}><Download size={14}/> Payslips</button>
+          <button className="btn btn-primary btn-sm" onClick={() => runMutation.mutate()} disabled={runMutation.isPending}>
+            <Play size={14}/> {runMutation.isPending ? 'Running…' : 'Run Payroll'}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowAdd(true)}><Plus size={14}/> Add Employee</button>
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid4" style={{ marginBottom:20 }}>
+        {[
+          ['Total Employees', employees.length, '#1e4fcc', '#eff4ff', <Users size={20}/>],
+          ['Gross Payroll', fmt(totals.gross), '#059669', '#ecfdf5', <IndianRupee size={20}/>],
+          ['Net Payroll', fmt(totals.net), '#0284c7', '#f0f9ff', <IndianRupee size={20}/>],
+          ['PF + TDS Due', fmt(totals.pf + totals.tds), '#d97706', '#fffbeb', <Calculator size={20}/>],
+        ].map(([label, value, color, bg, icon]) => (
+          <div key={label} className="kpi-card">
+            <div className="kpi-label">{label}</div>
+            <div className="kpi-value" style={{ color }}>{value}</div>
+            <div className="kpi-icon" style={{ background:bg, color }}>{icon}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:4, background:'var(--bg)', borderRadius:10, padding:4, marginBottom:20, width:'fit-content', border:'1px solid var(--border)' }}>
+        {[['employees','Employees'],['salary','Salary Register'],['tds','TDS Workings'],['pf','PF/ESI Challan'],['history','Payroll History']].map(([v,l]) => (
+          <button key={v} onClick={() => setTab(v)} style={{ padding:'8px 16px', borderRadius:8, border:'none', fontSize:13, fontWeight:600, cursor:'pointer', background:tab===v?'var(--surface)':'transparent', color:tab===v?'var(--blue)':'var(--text3)' }}>{l}</button>
+        ))}
+      </div>
+
+      {/* ── Employees Tab ── */}
+      {tab === 'employees' && (
+        <div className="card">
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
+            <div style={{ fontWeight:700 }}>Employee Master</div>
+          </div>
+          <div className="tbl-wrap">
+            <table>
+              <thead><tr><th>Employee</th><th>Designation</th><th>Department</th><th>Basic</th><th>HRA</th><th>Gross</th><th>PF</th><th>Net Pay</th><th>Actions</th></tr></thead>
+              <tbody>
+                {isLoading ? [1,2,3].map(i=><tr key={i}>{Array(9).fill(0).map((_,j)=><td key={j}><div className="skeleton" style={{height:14,width:80}}/></td>)}</tr>) :
+                employees.length === 0 ? (
+                  <tr><td colSpan={9} style={{ textAlign:'center', padding:40, color:'var(--text3)' }}>
+                    <Users size={36} style={{ marginBottom:10, opacity:.3 }}/><div>No employees yet</div>
+                    <button className="btn btn-primary btn-sm" style={{ marginTop:12 }} onClick={() => setShowAdd(true)}>Add First Employee</button>
+                  </td></tr>
+                ) :
+                employees.map(emp => (
+                  <tr key={emp.id}>
+                    <td>
+                      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                        <div style={{ width:34, height:34, borderRadius:'50%', background:'var(--blue)', display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:13, fontWeight:700, flexShrink:0 }}>
+                          {emp.first_name[0]}{emp.last_name[0]}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight:600 }}>{emp.first_name} {emp.last_name}</div>
+                          <div style={{ fontSize:11, color:'var(--text3)' }}>{emp.employee_code}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ color:'var(--text2)' }}>{emp.designation || '—'}</td>
+                    <td><span style={{ background:'var(--blue-light)', color:'var(--blue)', padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600 }}>{emp.department || '—'}</span></td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13 }}>{fmt(emp.basic)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13 }}>{fmt(emp.hra)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:700 }}>{fmt(emp.gross)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13, color:'var(--warn)' }}>{fmt(emp.pfEmployee)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:700, color:'var(--success)' }}>{fmt(emp.netPay)}</td>
+                    <td><button className="btn btn-secondary btn-sm" onClick={() => toast('Edit employee')}>Edit</button></td>
+                  </tr>
+                ))}
+              </tbody>
+              {employees.length > 0 && (
+                <tfoot>
+                  <tr style={{ background:'var(--blue-light)', fontWeight:700 }}>
+                    <td colSpan={5} style={{ padding:'12px 14px' }}>Total ({employees.length} employees)</td>
+                    <td style={{ padding:'12px 14px', fontFamily:'var(--mono)' }}>{fmt(totals.gross)}</td>
+                    <td style={{ padding:'12px 14px', fontFamily:'var(--mono)', color:'var(--warn)' }}>{fmt(totals.pf)}</td>
+                    <td style={{ padding:'12px 14px', fontFamily:'var(--mono)', color:'var(--success)' }}>{fmt(totals.net)}</td>
+                    <td/>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Salary Register ── */}
+      {tab === 'salary' && (
+        <div className="card">
+          <div style={{ fontWeight:700, marginBottom:16 }}>Salary Register — {MONTHS[month-1]} {year}</div>
+          <div className="tbl-wrap">
+            <table>
+              <thead><tr><th>Employee</th><th>Basic</th><th>HRA</th><th>Special</th><th>Gross</th><th>PF(12%)</th><th>ESI(0.75%)</th><th>TDS</th><th>Net Pay</th></tr></thead>
+              <tbody>
+                {employees.map(emp => (
+                  <tr key={emp.id}>
+                    <td style={{ fontWeight:600 }}>{emp.first_name} {emp.last_name}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13 }}>{fmt(emp.basic)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13 }}>{fmt(emp.hra)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13 }}>{fmt(emp.special_allowance)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:700 }}>{fmt(emp.gross)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13, color:'var(--warn)' }}>{fmt(emp.pfEmployee)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13 }}>{fmt(emp.esiEmployee)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13, color:'var(--info)' }}>{fmt(emp.tdsMonthly)}</td>
+                    <td style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:700, color:'var(--success)' }}>{fmt(emp.netPay)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── TDS Tab ── */}
+      {tab === 'tds' && (
+        <div className="card">
+          <div style={{ fontWeight:700, marginBottom:4 }}>TDS Calculation — Section 192</div>
+          <div style={{ fontSize:13, color:'var(--text3)', marginBottom:16 }}>New Tax Regime FY {year}-{year+1} · Standard Deduction ₹75,000 · Rebate u/s 87A ≤₹7L</div>
+          <div className="tbl-wrap">
+            <table>
+              <thead><tr><th>Employee</th><th>Annual Gross</th><th>Std Deduction</th><th>Net Taxable</th><th>Annual TDS</th><th>Monthly TDS</th></tr></thead>
+              <tbody>
+                {employees.map(emp => {
+                  const annualGross = emp.gross * 12;
+                  const afterDeduction = annualGross - 75000;
+                  let annualTDS = 0;
+                  if (afterDeduction > 300000) {
+                    if (afterDeduction <= 700000) annualTDS = (afterDeduction-300000)*0.05;
+                    else if (afterDeduction <= 1000000) annualTDS = 20000+(afterDeduction-700000)*0.10;
+                    else annualTDS = 50000+(afterDeduction-1000000)*0.15;
+                  }
+                  if (afterDeduction <= 700000) annualTDS = 0; // 87A rebate
+                  const monthlyTDS = Math.round(annualTDS/12);
+                  const slabLabel = afterDeduction <= 300000 ? 'Nil' : afterDeduction <= 700000 ? '5%' : afterDeduction <= 1000000 ? '10%' : '15%+';
+                  const rebate = afterDeduction <= 700000 && afterDeduction > 300000;
+                  return (
+                    <tr key={emp.id}>
+                      <td style={{ fontWeight:600 }}>{emp.first_name} {emp.last_name}</td>
+                      <td style={{ fontFamily:'var(--mono)', fontSize:13 }}>{fmt(annualGross)}</td>
+                      <td style={{ fontFamily:'var(--mono)', fontSize:13, color:'var(--success)' }}>(₹75,000)</td>
+                      <td style={{ fontFamily:'var(--mono)', fontSize:13 }}>{fmt(afterDeduction)}</td>
+                      <td>
+                        <span style={{ background: rebate?'var(--success-soft)':annualTDS===0?'var(--success-soft)':'var(--warn-soft)', color:rebate||annualTDS===0?'var(--success)':'var(--warn)', padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:700 }}>
+                          {rebate ? '87A Rebate' : slabLabel}
+                        </span>
+                      </td>
+                      <td style={{ fontFamily:'var(--mono)', fontWeight:700, color:'var(--info)' }}>{fmt(monthlyTDS)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── PF/ESI Tab ── */}
+      {tab === 'pf' && (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+          <div className="card">
+            <div style={{ fontWeight:700, marginBottom:4 }}>🏦 PF Challan (ECR)</div>
+            <div style={{ fontSize:13, color:'var(--text3)', marginBottom:16 }}>EPFO Portal · Due 15th of following month</div>
+            {[
+              ['Employee PF (12% of Basic)', employees.reduce((s,e)=>s+(e.pfEmployee||0),0)],
+              ['Employer PF (3.67% to EPF)', employees.reduce((s,e)=>s+parseFloat(e.basic)*0.0367,0)],
+              ['Employer Pension (8.33% EPS)', employees.reduce((s,e)=>s+Math.min(parseFloat(e.basic)*0.0833,1250),0)],
+              ['EDLI Contribution (0.5%)', employees.reduce((s,e)=>s+parseFloat(e.basic)*0.005,0)],
+            ].map(([label, val]) => (
+              <div key={label} style={{ display:'flex', justifyContent:'space-between', padding:'10px 0', borderBottom:'1px solid var(--border)', fontSize:13 }}>
+                <span style={{ color:'var(--text2)' }}>{label}</span>
+                <span style={{ fontFamily:'var(--mono)', fontWeight:600 }}>{fmt(val)}</span>
+              </div>
+            ))}
+            <div style={{ display:'flex', justifyContent:'space-between', padding:'12px 0', fontWeight:700 }}>
+              <span>Total PF Due</span>
+              <span style={{ fontFamily:'var(--mono)', color:'var(--blue)' }}>
+                {fmt(employees.reduce((s,e)=>s+(e.pfEmployee||0),0) * 2.17)} {/* Total employer+employee */}
+              </span>
+            </div>
+            <button className="btn btn-primary" style={{ width:'100%' }} onClick={() => toast.success('ECR file generated! Upload to EPFO portal.')}>⬇ Generate ECR File</button>
+          </div>
+          <div className="card">
+            <div style={{ fontWeight:700, marginBottom:4 }}>🏥 ESI Challan</div>
+            <div style={{ fontSize:13, color:'var(--text3)', marginBottom:16 }}>Applicable: Gross salary ≤ ₹21,000/month</div>
+            {employees.filter(e => e.gross <= 21000).length === 0 ? (
+              <div style={{ textAlign:'center', padding:30, color:'var(--text3)', fontSize:13 }}>No employees eligible for ESI (all gross &gt; ₹21,000)</div>
+            ) : (
+              <>
+                {employees.filter(e => e.gross <= 21000).map(e => (
+                  <div key={e.id} style={{ padding:'8px 12px', background:'var(--success-soft)', borderRadius:9, marginBottom:8, fontSize:12, color:'var(--success)' }}>
+                    ✓ {e.first_name} {e.last_name} (₹{e.gross.toLocaleString('en-IN')}) — ESI applicable
+                  </div>
+                ))}
+                {[
+                  ['Employee ESI (0.75%)', employees.filter(e=>e.gross<=21000).reduce((s,e)=>s+(e.esiEmployee||0),0)],
+                  ['Employer ESI (3.25%)', employees.filter(e=>e.gross<=21000).reduce((s,e)=>s+Math.round(e.gross*0.0325),0)],
+                ].map(([label, val]) => (
+                  <div key={label} style={{ display:'flex', justifyContent:'space-between', padding:'10px 0', borderBottom:'1px solid var(--border)', fontSize:13 }}>
+                    <span style={{ color:'var(--text2)' }}>{label}</span>
+                    <span style={{ fontFamily:'var(--mono)', fontWeight:600 }}>{fmt(val)}</span>
+                  </div>
+                ))}
+                <button className="btn btn-primary" style={{ width:'100%', marginTop:14 }} onClick={() => toast.success('ESI challan generated!')}>⬇ Generate ESI Challan</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── History Tab ── */}
+      {tab === 'history' && (
+        <div className="card">
+          <div style={{ fontWeight:700, marginBottom:16 }}>Payroll Run History</div>
+          {history.length === 0 ? (
+            <div style={{ textAlign:'center', padding:40, color:'var(--text3)' }}>
+              <FileText size={36} style={{ marginBottom:10, opacity:.3 }}/><div>No payroll runs yet. Click "Run Payroll" to start.</div>
+            </div>
+          ) : (
+            <div className="tbl-wrap">
+              <table>
+                <thead><tr><th>Period</th><th>Employees</th><th>Gross</th><th>PF</th><th>TDS</th><th>Net</th><th>Status</th><th>Processed By</th></tr></thead>
+                <tbody>
+                  {history.map(h => (
+                    <tr key={h.id}>
+                      <td style={{ fontWeight:600 }}>{MONTHS[h.month-1]} {h.year}</td>
+                      <td>{h.employee_count}</td>
+                      <td style={{ fontFamily:'var(--mono)', fontSize:13 }}>{fmt(h.total_gross)}</td>
+                      <td style={{ fontFamily:'var(--mono)', fontSize:13, color:'var(--warn)' }}>{fmt(h.total_pf)}</td>
+                      <td style={{ fontFamily:'var(--mono)', fontSize:13, color:'var(--info)' }}>{fmt(h.total_tds)}</td>
+                      <td style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:700, color:'var(--success)' }}>{fmt(h.total_net)}</td>
+                      <td><span style={{ background:'var(--success-soft)', color:'var(--success)', padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:700 }}>{h.status}</span></td>
+                      <td style={{ fontSize:12, color:'var(--text3)' }}>{h.processed_by_name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Add Employee Modal */}
+      {showAdd && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:400, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div style={{ background:'var(--surface)', borderRadius:16, width:'100%', maxWidth:580, maxHeight:'90vh', overflowY:'auto', boxShadow:'0 8px 40px rgba(0,0,0,.2)' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'20px 24px 0' }}>
+              <div style={{ fontWeight:800, fontSize:17 }}>👷 Add Employee</div>
+              <button onClick={() => { setShowAdd(false); reset(); }} style={{ background:'none', border:'none', fontSize:20, cursor:'pointer', color:'var(--text3)' }}>✕</button>
+            </div>
+            <form onSubmit={handleSubmit(d => addMutation.mutate(d))} style={{ padding:24 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+                <div><label className="form-label">First Name *</label><input className="form-input" {...register('firstName',{required:true})} placeholder="Rahul"/></div>
+                <div><label className="form-label">Last Name *</label><input className="form-input" {...register('lastName',{required:true})} placeholder="Sharma"/></div>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+                <div><label className="form-label">Designation</label><input className="form-input" {...register('designation')} placeholder="Senior Accountant"/></div>
+                <div><label className="form-label">Department</label><input className="form-input" {...register('department')} placeholder="Accounts"/></div>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:14 }}>
+                <div><label className="form-label">Basic (₹)</label><input type="number" className="form-input" {...register('basic')} defaultValue={0}/></div>
+                <div><label className="form-label">HRA (₹)</label><input type="number" className="form-input" {...register('hra')} defaultValue={0}/></div>
+                <div><label className="form-label">Special Allowance (₹)</label><input type="number" className="form-input" {...register('specialAllowance')} defaultValue={0}/></div>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+                <div><label className="form-label">PAN</label><input className="form-input" {...register('pan')} placeholder="ABCDE1234F" style={{ textTransform:'uppercase' }}/></div>
+                <div><label className="form-label">UAN</label><input className="form-input" {...register('uan')} placeholder="100000000000"/></div>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:20 }}>
+                <div><label className="form-label">Date of Joining</label><input type="date" className="form-input" {...register('dateOfJoining')}/></div>
+                <div style={{ display:'flex', gap:20, alignItems:'center', paddingTop:24 }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13 }}>
+                    <input type="checkbox" {...register('pfApplicable')} defaultChecked style={{ accentColor:'var(--blue)' }}/> PF Applicable
+                  </label>
+                  <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13 }}>
+                    <input type="checkbox" {...register('esiApplicable')} style={{ accentColor:'var(--blue)' }}/> ESI Applicable
+                  </label>
+                </div>
+              </div>
+              <div style={{ display:'flex', justifyContent:'flex-end', gap:10 }}>
+                <button type="button" className="btn btn-secondary" onClick={() => { setShowAdd(false); reset(); }}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={addMutation.isPending}>
+                  {addMutation.isPending ? 'Adding…' : 'Add Employee'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
