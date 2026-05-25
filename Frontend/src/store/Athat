@@ -1,0 +1,68 @@
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import api from '../services/api';
+
+const useAuthStore = create(
+  persist(
+    (set, get) => ({
+      user: null,
+      accessToken: null,
+      refreshToken: null,
+      activeCompanyId: null,
+
+      setAuth: (user, accessToken, refreshToken) => {
+        const firstCompany = user?.companies?.[0];
+        set({
+          user,
+          accessToken,
+          refreshToken,
+          activeCompanyId: get().activeCompanyId || firstCompany?.id,
+        });
+        api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+        if (get().activeCompanyId || firstCompany?.id) {
+          api.defaults.headers.common['x-company-id'] = get().activeCompanyId || firstCompany?.id;
+        }
+      },
+
+      setActiveCompany: (companyId) => {
+        set({ activeCompanyId: companyId });
+        api.defaults.headers.common['x-company-id'] = companyId;
+      },
+
+      getActiveCompany: () => {
+        const { user, activeCompanyId } = get();
+        return user?.companies?.find(c => c.id === activeCompanyId) || user?.companies?.[0];
+      },
+
+      getRole: () => {
+        const { user, activeCompanyId } = get();
+        const company = user?.companies?.find(c => c.id === activeCompanyId);
+        return company?.role || 'Viewer';
+      },
+
+      updateToken: (accessToken, refreshToken) => {
+        set({ accessToken, refreshToken });
+        api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+      },
+
+      logout: () => {
+        set({ user: null, accessToken: null, refreshToken: null, activeCompanyId: null });
+        delete api.defaults.headers.common['Authorization'];
+        delete api.defaults.headers.common['x-company-id'];
+      },
+
+      isAuthenticated: () => !!get().accessToken && !!get().user,
+    }),
+    {
+      name: 'smartca-auth',
+      partialize: (state) => ({
+        user: state.user,
+        accessToken: state.accessToken,
+        refreshToken: state.refreshToken,
+        activeCompanyId: state.activeCompanyId,
+      }),
+    }
+  )
+);
+
+export default useAuthStore;
