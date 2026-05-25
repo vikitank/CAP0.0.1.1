@@ -1,0 +1,128 @@
+// ─── Currency & Number Formatters ─────────────────────────────────────────────
+export const fmt = (n, decimals = 0) =>
+  new Intl.NumberFormat('en-IN', {
+    style: 'currency', currency: 'INR', maximumFractionDigits: decimals
+  }).format(n || 0);
+
+export const fmtNum = (n) =>
+  new Intl.NumberFormat('en-IN').format(n || 0);
+
+export const fmtShort = (n) => {
+  n = Number(n || 0);
+  if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)}Cr`;
+  if (n >= 100000)   return `₹${(n / 100000).toFixed(2)}L`;
+  if (n >= 1000)     return `₹${(n / 1000).toFixed(1)}K`;
+  return `₹${n.toFixed(0)}`;
+};
+
+// ─── Date Formatters ──────────────────────────────────────────────────────────
+export const fmtDate = (d) =>
+  d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+export const fmtDateTime = (d) =>
+  d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+
+// For input[type=date] value
+export const toDateInputValue = (d) =>
+  d ? new Date(d).toISOString().split('T')[0] : '';
+
+// Indian financial year: Apr–Mar
+export function getCurrentFY() {
+  const now = new Date();
+  const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  return { start: `${year}-04-01`, end: `${year + 1}-03-31`, label: `${year}-${String(year + 1).slice(-2)}` };
+}
+
+// ─── Validators ───────────────────────────────────────────────────────────────
+export function validateGSTIN(gstin) {
+  if (!gstin) return false;
+  return /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstin.trim().toUpperCase());
+}
+
+export function validatePAN(pan) {
+  return /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test((pan || '').trim().toUpperCase());
+}
+
+export function validateMobile(mobile) {
+  return /^(\+91)?[6-9][0-9]{9}$/.test((mobile || '').replace(/\s/g, ''));
+}
+
+export function validateEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '');
+}
+
+export function validateIFSC(ifsc) {
+  return /^[A-Z]{4}0[A-Z0-9]{6}$/.test((ifsc || '').trim().toUpperCase());
+}
+
+// ─── GST Calculation ──────────────────────────────────────────────────────────
+export function calcGST(rate, taxable, isIGST = false) {
+  const tax = taxable * rate / 100;
+  return isIGST
+    ? { cgst: 0, sgst: 0, igst: tax, total: taxable + tax }
+    : { cgst: tax / 2, sgst: tax / 2, igst: 0, total: taxable + tax };
+}
+
+export function calcItemGST(qty, rate, gstRate, discount = 0, isIGST = false) {
+  const taxable = qty * rate * (1 - discount / 100);
+  return { taxable, ...calcGST(gstRate, taxable, isIGST), amount: taxable + taxable * gstRate / 100 };
+}
+
+// ─── String Helpers ───────────────────────────────────────────────────────────
+export const initials = (name = '') =>
+  name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
+
+export const truncate = (str, len = 40) =>
+  str && str.length > len ? str.slice(0, len) + '…' : str;
+
+export const slugify = (str) =>
+  str.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+
+// ─── Voucher Helpers ──────────────────────────────────────────────────────────
+export const VOUCHER_TYPE_COLORS = {
+  Sales:      { color: '#059669', bg: '#ecfdf5', icon: '🧾' },
+  Purchase:   { color: '#dc2626', bg: '#fef2f2', icon: '🛒' },
+  Receipt:    { color: '#0284c7', bg: '#f0f9ff', icon: '💰' },
+  Payment:    { color: '#d97706', bg: '#fffbeb', icon: '💸' },
+  Journal:    { color: '#475569', bg: '#f8fafc', icon: '📔' },
+  Contra:     { color: '#7c3aed', bg: '#fdf4ff', icon: '🔄' },
+  DebitNote:  { color: '#b91c1c', bg: '#fff1f2', icon: '📤' },
+  CreditNote: { color: '#059669', bg: '#f0fdf4', icon: '📥' },
+};
+
+export const VOUCHER_PREFIXES = {
+  Sales: 'SI', Purchase: 'PI', Receipt: 'REC', Payment: 'PAY',
+  Journal: 'JV', Contra: 'CNT', DebitNote: 'DN', CreditNote: 'CN',
+};
+
+// ─── Local Storage helpers ────────────────────────────────────────────────────
+export const storage = {
+  get: (key, fallback = null) => {
+    try { return JSON.parse(localStorage.getItem(key)) ?? fallback; }
+    catch { return fallback; }
+  },
+  set: (key, val) => {
+    try { localStorage.setItem(key, JSON.stringify(val)); }
+    catch {}
+  },
+  remove: (key) => localStorage.removeItem(key),
+};
+
+// ─── Indian State List ────────────────────────────────────────────────────────
+export const INDIAN_STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
+  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
+  'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
+  'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu',
+  'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+  'Delhi', 'Jammu & Kashmir', 'Ladakh', 'Chandigarh', 'Puducherry',
+  'Andaman & Nicobar', 'Lakshadweep', 'Dadra & Nagar Haveli',
+];
+
+// ─── Error Extractor ──────────────────────────────────────────────────────────
+export function extractError(err) {
+  return err?.response?.data?.error
+    || err?.response?.data?.message
+    || err?.message
+    || 'Something went wrong. Please try again.';
+}
