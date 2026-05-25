@@ -1,0 +1,154 @@
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import toast from 'react-hot-toast';
+import useAuthStore from '../store/authStore';
+import { authApi } from '../services/api';
+import { Eye, EyeOff, Mail, Lock, Phone, Building2, User, Loader2 } from 'lucide-react';
+
+function PwdStrength({ password }) {
+  const score = [/.{8,}/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter(r => r.test(password || '')).length;
+  const labels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
+  const colors = ['', '#dc2626', '#d97706', '#0284c7', '#059669'];
+  return password ? (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} style={{ flex: 1, height: 4, borderRadius: 99, background: i <= score ? colors[score] : 'var(--border)', transition: 'all .3s' }} />
+        ))}
+      </div>
+      <div style={{ fontSize: 11, marginTop: 4, color: colors[score] }}>{labels[score]}</div>
+    </div>
+  ) : null;
+}
+
+export default function SignupPage() {
+  const navigate = useNavigate();
+  const setAuth = useAuthStore(s => s.setAuth);
+  const [showPwd, setShowPwd] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { register, handleSubmit, watch, formState: { errors } } = useForm();
+  const pwd = watch('password');
+
+  const onSubmit = async (data) => {
+    if (!data.terms) { toast.error('Please accept Terms of Service'); return; }
+    setLoading(true);
+    try {
+      const res = await authApi.signup(data);
+      setAuth(res.data.user, res.data.accessToken, res.data.refreshToken);
+      toast.success('Account created! Welcome to SmartCA.ai 🎉');
+      navigate('/dashboard');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Signup failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
+      {/* Left Panel */}
+      <div style={{ width: 420, flexShrink: 0, background: 'linear-gradient(145deg,#0f2d7a 0%,#1e4fcc 100%)', display: 'flex', flexDirection: 'column', padding: 48, justifyContent: 'center' }} className="hide-mobile">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 48 }}>
+          <div style={{ width: 44, height: 44, background: '#f59e0b', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 14, color: '#fff' }}>SCA</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 20, color: '#fff' }}>Smart<span style={{ color: '#f59e0b' }}>CA</span>.ai</div>
+        </div>
+        <div style={{ color: '#fff', fontFamily: 'var(--font-display)', fontSize: 28, fontWeight: 800, marginBottom: 16 }}>14-day Free Trial</div>
+        <div style={{ color: 'rgba(255,255,255,.7)', fontSize: 15, lineHeight: 1.7, marginBottom: 40 }}>Sab features free mein try karein. Credit card ki zaroorat nahi.</div>
+        {['Unlimited voucher entries', 'GST returns auto-generate', 'All financial reports', 'Inventory management', 'Multi-user support', 'AI assistant included'].map(f => (
+          <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ width: 20, height: 20, borderRadius: 99, background: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#fff', flexShrink: 0 }}>✓</div>
+            <span style={{ color: 'rgba(255,255,255,.85)', fontSize: 14 }}>{f}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Right Panel */}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40, overflowY: 'auto' }}>
+        <div style={{ width: '100%', maxWidth: 480 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--accent-soft)', border: '1px solid rgba(245,158,11,.3)', color: '#b45309', padding: '6px 14px', borderRadius: 99, fontSize: 12, fontWeight: 600, marginBottom: 24 }}>
+            🎉 14-day free trial — sab features unlock
+          </div>
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 800, marginBottom: 6 }}>Account banayein</h2>
+          <p style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 28 }}>SmartCA.ai ke saath apna business manage karein</p>
+
+          <form onSubmit={handleSubmit(onSubmit)}>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">First Name</label>
+                <div className="input-wrap">
+                  <User size={16} className="input-icon" />
+                  <input className={`form-input ${errors.firstName ? 'error' : ''}`} placeholder="Rahul" {...register('firstName', { required: 'Required' })} />
+                </div>
+                {errors.firstName && <p className="form-error">{errors.firstName.message}</p>}
+              </div>
+              <div className="form-group">
+                <label className="form-label">Last Name</label>
+                <input className={`form-input ${errors.lastName ? 'error' : ''}`} placeholder="Mehta" {...register('lastName', { required: 'Required' })} />
+                {errors.lastName && <p className="form-error">{errors.lastName.message}</p>}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Business Email</label>
+              <div className="input-wrap">
+                <Mail size={16} className="input-icon" />
+                <input className={`form-input ${errors.email ? 'error' : ''}`} type="email" placeholder="aapka@business.com" {...register('email', { required: 'Email required', pattern: { value: /\S+@\S+\.\S+/, message: 'Invalid email' } })} />
+              </div>
+              {errors.email && <p className="form-error">{errors.email.message}</p>}
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Mobile</label>
+                <div className="input-wrap">
+                  <Phone size={16} className="input-icon" />
+                  <input className="form-input" type="tel" placeholder="+91 98765 43210" {...register('mobile')} />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Company Name</label>
+                <div className="input-wrap">
+                  <Building2 size={16} className="input-icon" />
+                  <input className={`form-input ${errors.companyName ? 'error' : ''}`} placeholder="Your Business Pvt Ltd" {...register('companyName', { required: 'Company name required' })} />
+                </div>
+                {errors.companyName && <p className="form-error">{errors.companyName.message}</p>}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <div className="input-wrap">
+                <Lock size={16} className="input-icon" />
+                <input className={`form-input ${errors.password ? 'error' : ''}`} type={showPwd ? 'text' : 'password'} placeholder="Min 8 characters, 1 uppercase, 1 number"
+                  {...register('password', { required: 'Password required', minLength: { value: 8, message: 'Min 8 characters' }, pattern: { value: /(?=.*[A-Z])(?=.*[0-9])/, message: 'Need 1 uppercase & 1 number' } })} />
+                <button type="button" className="input-action" onClick={() => setShowPwd(v => !v)}>
+                  {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              {errors.password && <p className="form-error">{errors.password.message}</p>}
+              <PwdStrength password={pwd} />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 20 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', fontSize: 13, color: 'var(--text2)' }}>
+                <input type="checkbox" style={{ accentColor: 'var(--blue)', marginTop: 2 }} {...register('terms')} />
+                <span>I agree to <Link to="/terms">Terms of Service</Link> aur <Link to="/privacy">Privacy Policy</Link></span>
+              </label>
+            </div>
+
+            <button type="submit" className="btn btn-primary btn-full btn-lg" disabled={loading}>
+              {loading ? <Loader2 size={18} style={{ animation: 'spin .6s linear infinite' }} /> : null}
+              {loading ? 'Creating account...' : 'Create Free Account →'}
+            </button>
+          </form>
+
+          <p style={{ textAlign: 'center', marginTop: 24, fontSize: 14, color: 'var(--text2)' }}>
+            Pehle se account hai?{' '}
+            <Link to="/login" style={{ color: 'var(--blue)', fontWeight: 700 }}>Login karein</Link>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
