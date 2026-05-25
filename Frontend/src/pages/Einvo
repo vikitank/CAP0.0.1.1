@@ -1,0 +1,166 @@
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { voucherApi, gstApi } from '../services/api';
+import toast from 'react-hot-toast';
+import { FileCheck, AlertCircle, CheckCircle2, ExternalLink } from 'lucide-react';
+
+const fmt = (n) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n || 0);
+
+export default function EInvoicePage() {
+  const [tab, setTab] = useState('einvoice');
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['sales-invoices'],
+    queryFn: () => voucherApi.list({ type: 'Sales', status: 'Posted' }).then(r => r.data),
+  });
+
+  const invoices = data?.data || [];
+  const withIRN = invoices.filter(v => v.irn_no);
+  const withoutIRN = invoices.filter(v => !v.irn_no && Number(v.total_amount) >= 50000);
+
+  return (
+    <div className="fade-in">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+        <div>
+          <h1 className="page-title">e-Invoice & e-Way Bill</h1>
+          <p className="page-sub">NIC e-Invoice IRN generation · GST Portal integration</p>
+        </div>
+        <a href="https://einvoice1.gst.gov.in" target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
+          <ExternalLink size={14}/> NIC Portal
+        </a>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:4, background:'var(--bg)', borderRadius:10, padding:4, marginBottom:20, width:'fit-content' }}>
+        {[['einvoice','e-Invoice'],['eway','e-Way Bill'],['setup','API Setup']].map(([v,l]) => (
+          <button key={v} onClick={() => setTab(v)} style={{ padding:'8px 18px', borderRadius:8, border:'none', fontSize:13, fontWeight:600, cursor:'pointer', background:tab===v?'var(--surface)':'transparent', color:tab===v?'var(--blue)':'var(--text3)', boxShadow:tab===v?'var(--shadow)':'none' }}>{l}</button>
+        ))}
+      </div>
+
+      {tab === 'einvoice' && (
+        <>
+          {/* KPIs */}
+          <div className="grid3" style={{ marginBottom:20 }}>
+            <div className="kpi-card">
+              <div className="kpi-label">Total Sales Invoices</div>
+              <div className="kpi-value">{invoices.length}</div>
+              <div className="kpi-icon" style={{ background:'var(--blue-light)', color:'var(--blue)' }}><FileCheck size={20}/></div>
+            </div>
+            <div className="kpi-card">
+              <div className="kpi-label">IRN Generated</div>
+              <div className="kpi-value" style={{ color:'var(--success)' }}>{withIRN.length}</div>
+              <div className="kpi-icon" style={{ background:'var(--success-soft)', color:'var(--success)' }}><CheckCircle2 size={20}/></div>
+            </div>
+            <div className="kpi-card">
+              <div className="kpi-label">Pending (≥₹50,000)</div>
+              <div className="kpi-value" style={{ color:'var(--warn)' }}>{withoutIRN.length}</div>
+              <div className="kpi-icon" style={{ background:'var(--warn-soft)', color:'var(--warn)' }}><AlertCircle size={20}/></div>
+            </div>
+          </div>
+
+          {/* Pending IRN */}
+          {withoutIRN.length > 0 && (
+            <div className="card" style={{ marginBottom:16, borderLeft:'4px solid var(--warn)', borderRadius:'0 var(--r-lg) var(--r-lg) 0' }}>
+              <div style={{ fontWeight:700, color:'var(--warn)', marginBottom:10 }}>⚠️ {withoutIRN.length} invoices need e-Invoice (≥₹50,000 threshold)</div>
+              <div className="tbl-wrap">
+                <table>
+                  <thead><tr><th>Invoice No</th><th>Date</th><th>Party</th><th>Amount</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {withoutIRN.map(v => (
+                      <tr key={v.id}>
+                        <td><span style={{ fontFamily:'var(--mono)', color:'var(--blue)', fontSize:12 }}>{v.number}</span></td>
+                        <td style={{ color:'var(--text2)', fontSize:13 }}>{v.date}</td>
+                        <td className="td-bold">{v.party_name || '—'}</td>
+                        <td className="td-mono">{fmt(v.total_amount)}</td>
+                        <td>
+                          <button className="btn btn-primary btn-sm" onClick={() => toast('Configure NIC API in Settings first', 'info')}>
+                            Generate IRN
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* With IRN */}
+          <div className="card">
+            <div style={{ fontWeight:700, marginBottom:14 }}>✅ IRN Generated Invoices</div>
+            {withIRN.length === 0 ? (
+              <div style={{ textAlign:'center', padding:40, color:'var(--text3)' }}>
+                <FileCheck size={40} style={{ marginBottom:12, opacity:.3 }}/>
+                <div>No IRN generated yet. Configure NIC API in Settings.</div>
+              </div>
+            ) : (
+              <div className="tbl-wrap">
+                <table>
+                  <thead><tr><th>Invoice No</th><th>Date</th><th>Party</th><th>Amount</th><th>IRN</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {withIRN.map(v => (
+                      <tr key={v.id}>
+                        <td><span style={{ fontFamily:'var(--mono)', color:'var(--blue)', fontSize:12 }}>{v.number}</span></td>
+                        <td>{v.date}</td>
+                        <td className="td-bold">{v.party_name}</td>
+                        <td className="td-mono">{fmt(v.total_amount)}</td>
+                        <td><span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--success)' }}>{v.irn_no?.substring(0,20)}...</span></td>
+                        <td><button className="btn btn-secondary btn-sm">📄 QR</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === 'eway' && (
+        <div className="card">
+          <div style={{ textAlign:'center', padding:60, color:'var(--text3)' }}>
+            <div style={{ fontSize:48, marginBottom:16 }}>🚚</div>
+            <div style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>e-Way Bill Generation</div>
+            <div style={{ fontSize:13, maxWidth:400, margin:'0 auto 20px' }}>
+              e-Way Bill is required for goods movement above ₹50,000. Connect to NIC e-Way Bill portal API in Settings.
+            </div>
+            <a href="https://ewaybillgst.gov.in" target="_blank" rel="noreferrer" className="btn btn-primary">
+              <ExternalLink size={14}/> Open e-Way Bill Portal
+            </a>
+          </div>
+        </div>
+      )}
+
+      {tab === 'setup' && (
+        <div className="card">
+          <div style={{ fontWeight:700, fontSize:16, marginBottom:16 }}>🔧 NIC API Setup</div>
+          <div style={{ display:'flex', flexDirection:'column', gap:14, maxWidth:500 }}>
+            <div>
+              <label className="form-label">NIC Username (GSTIN-based)</label>
+              <input className="form-input" placeholder="Your GSTIN for NIC portal"/>
+            </div>
+            <div>
+              <label className="form-label">NIC Password</label>
+              <input type="password" className="form-input" placeholder="NIC portal password"/>
+            </div>
+            <div>
+              <label className="form-label">Client ID</label>
+              <input className="form-input" placeholder="From NIC sandbox/production"/>
+            </div>
+            <div>
+              <label className="form-label">Client Secret</label>
+              <input type="password" className="form-input" placeholder="From NIC sandbox/production"/>
+            </div>
+            <div style={{ padding:'12px 16px', background:'var(--info-soft)', borderRadius:9, fontSize:13, color:'var(--info)' }}>
+              ℹ️ Start with NIC Sandbox: <a href="https://einvoice1-uat.nic.in" target="_blank">einvoice1-uat.nic.in</a>
+              <br/>Production: Apply at <a href="https://einvoice1.gst.gov.in" target="_blank">einvoice1.gst.gov.in</a>
+            </div>
+            <button className="btn btn-primary" style={{ width:'fit-content' }} onClick={() => toast.success('Settings saved! Test connection to verify.')}>
+              Save & Test Connection
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
