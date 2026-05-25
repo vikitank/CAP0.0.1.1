@@ -1,0 +1,69 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { itemApi } from '../services/api';
+import { useForm } from 'react-hook-form';
+import toast from 'react-hot-toast';
+import { Plus, Package, AlertTriangle } from 'lucide-react';
+
+export default function InventoryPage() {
+  const [showAdd, setShowAdd] = useState(false);
+  const qc = useQueryClient();
+  const { register, handleSubmit, reset } = useForm();
+  const { data: items = [], isLoading } = useQuery({ queryKey: ['items'], queryFn: () => itemApi.list({}).then(r => r.data) });
+  const addMutation = useMutation({
+    mutationFn: (d) => itemApi.create(d),
+    onSuccess: () => { qc.invalidateQueries(['items']); toast.success('Item created!'); setShowAdd(false); reset(); },
+    onError: (e) => toast.error(e.response?.data?.error || 'Failed'),
+  });
+
+  return (
+    <div className="fade-in">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+        <div><h1 className="page-title">Inventory</h1><p className="page-sub">Stock & item management</p></div>
+        <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}><Plus size={14}/> Add Item</button>
+      </div>
+      <div className="grid4" style={{ marginBottom:20 }}>
+        {[['Total Items', items.length, '📦'], ['Low Stock', items.filter(i=>Number(i.currentStock)<5).length, '⚠️'], ['Out of Stock', items.filter(i=>Number(i.currentStock)<=0).length, '🚫'], ['Services', items.filter(i=>i.isService).length, '🛠️']].map(([l,v,ic]) => (
+          <div key={l} className="kpi-card"><div className="kpi-label">{l}</div><div className="kpi-value">{v}</div><div className="kpi-icon" style={{background:'var(--blue-light)',color:'var(--blue)',fontSize:20}}>{ic}</div></div>
+        ))}
+      </div>
+      {showAdd && (
+        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setShowAdd(false)}>
+          <div className="modal modal-md">
+            <div className="modal-header"><div className="modal-title">Add Item</div><button className="btn btn-ghost btn-icon" onClick={()=>setShowAdd(false)}>✕</button></div>
+            <form onSubmit={handleSubmit(d=>addMutation.mutate(d))}>
+              <div className="modal-body">
+                <div className="form-row"><div className="form-group"><label className="form-label">Item Name *</label><input className="form-input" {...register('name',{required:true})} placeholder="e.g. LED Monitor 24 inch"/></div><div className="form-group"><label className="form-label">HSN Code</label><input className="form-input" {...register('hsnCode')} placeholder="8528"/></div></div>
+                <div className="form-row"><div className="form-group"><label className="form-label">Purchase Rate (₹)</label><input type="number" className="form-input" {...register('purchaseRate')}/></div><div className="form-group"><label className="form-label">Sales Rate (₹)</label><input type="number" className="form-input" {...register('salesRate')}/></div></div>
+                <div className="form-row"><div className="form-group"><label className="form-label">GST Rate (%)</label><select className="form-input" {...register('gstRate')}><option value={0}>0%</option><option value={5}>5%</option><option value={12}>12%</option><option value={18}>18%</option><option value={28}>28%</option></select></div><div className="form-group"><label className="form-label">Unit</label><select className="form-input" {...register('unit')}><option>Nos</option><option>Kg</option><option>Ltr</option><option>Mtr</option><option>Box</option><option>Pcs</option></select></div></div>
+                <div className="form-row"><div className="form-group"><label className="form-label">Opening Stock</label><input type="number" className="form-input" defaultValue={0} {...register('openingStock')}/></div><div className="form-group"><label className="form-label">Min Stock Alert</label><input type="number" className="form-input" {...register('minStock')}/></div></div>
+                <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13}}><input type="checkbox" {...register('isService')}/> This is a Service (no stock tracking)</label>
+              </div>
+              <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={()=>setShowAdd(false)}>Cancel</button><button type="submit" className="btn btn-primary">Add Item</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+      <div className="tbl-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>HSN</th><th>Purchase Rate</th><th>Sales Rate</th><th>GST%</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>
+            {isLoading ? [1,2,3].map(i=><tr key={i}>{[120,60,80,80,50,60,60,60].map((w,j)=><td key={j}><div className="skeleton" style={{height:14,width:w}}/></td>)}</tr>) :
+            items.map(item => (
+              <tr key={item.id}>
+                <td><div className="td-bold">{item.name}</div><div style={{fontSize:11,color:'var(--text3)'}}>{item.category||'General'}</div></td>
+                <td className="td-mono">{item.hsnCode||'—'}</td>
+                <td className="td-mono">₹{Number(item.purchaseRate||0).toLocaleString('en-IN')}</td>
+                <td className="td-mono">₹{Number(item.salesRate||0).toLocaleString('en-IN')}</td>
+                <td><span className="badge badge-blue">{item.gstRate}%</span></td>
+                <td>{item.isService ? <span style={{color:'var(--text3)'}}>Service</span> : <span style={{fontWeight:600,color:Number(item.currentStock)<=0?'var(--danger)':Number(item.currentStock)<5?'var(--warn)':'var(--success)'}}>{Number(item.currentStock)} {item.unit}</span>}</td>
+                <td><span className={`badge ${item.isActive?'badge-success':'badge-neutral'}`}>{item.isActive?'Active':'Inactive'}</span></td>
+                <td><button className="btn btn-secondary btn-sm">Edit</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
