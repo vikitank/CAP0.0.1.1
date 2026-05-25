@@ -1,0 +1,146 @@
+// AccountingPage.jsx
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { ledgerApi, reportApi } from '../services/api';
+import { Search, Plus, Download } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { useForm } from 'react-hook-form';
+
+const fmt = (n) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n || 0);
+
+export function AccountingPage() {
+  const [tab, setTab] = useState('ledgers');
+  const [search, setSearch] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+  const queryClient = useQueryClient();
+  const { register, handleSubmit, reset } = useForm();
+
+  const { data: ledgers = [], isLoading } = useQuery({
+    queryKey: ['ledgers', search],
+    queryFn: () => ledgerApi.list({ search }).then(r => r.data),
+  });
+
+  const { data: groups = [] } = useQuery({
+    queryKey: ['ledger-groups'],
+    queryFn: () => ledgerApi.groups().then(r => r.data),
+  });
+
+  const { data: trialBalance } = useQuery({
+    queryKey: ['trial-balance'],
+    queryFn: () => reportApi.trialBalance({}).then(r => r.data),
+    enabled: tab === 'trial-balance',
+  });
+
+  const addMutation = useMutation({
+    mutationFn: (data) => ledgerApi.create(data),
+    onSuccess: () => { queryClient.invalidateQueries(['ledgers']); toast.success('Ledger created!'); setShowAdd(false); reset(); },
+    onError: (e) => toast.error(e.response?.data?.error || 'Failed to create ledger'),
+  });
+
+  const natureColors = { Assets: '#0284c7', Liabilities: '#dc2626', Income: '#059669', Expense: '#d97706' };
+
+  return (
+    <div className="fade-in">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div><h1 className="page-title">Accounting</h1><p className="page-sub">Chart of accounts & ledger management</p></div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-secondary btn-sm"><Download size={14} /> Export</button>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}><Plus size={14} /> New Ledger</button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 4, background: 'var(--bg)', borderRadius: 10, padding: 4, marginBottom: 20, width: 'fit-content' }}>
+        {[['ledgers','Ledgers'], ['trial-balance','Trial Balance']].map(([val, lbl]) => (
+          <button key={val} onClick={() => setTab(val)} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer', background: tab === val ? 'var(--surface)' : 'transparent', color: tab === val ? 'var(--blue)' : 'var(--text3)', boxShadow: tab === val ? 'var(--shadow)' : 'none', transition: 'all .15s' }}>{lbl}</button>
+        ))}
+      </div>
+
+      {/* Add Ledger Modal */}
+      {showAdd && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowAdd(false)}>
+          <div className="modal modal-md">
+            <div className="modal-header"><div className="modal-title">Create New Ledger</div><button className="btn btn-ghost btn-icon" onClick={() => setShowAdd(false)}>✕</button></div>
+            <form onSubmit={handleSubmit(d => addMutation.mutate(d))}>
+              <div className="modal-body">
+                <div className="form-group"><label className="form-label">Ledger Name *</label><input className="form-input" placeholder="e.g. HDFC Bank Current A/c" {...register('name', { required: true })} /></div>
+                <div className="form-group"><label className="form-label">Group *</label>
+                  <select className="form-input" {...register('groupId', { required: true })}>
+                    <option value="">Select group</option>
+                    {groups.map(g => <option key={g.id} value={g.id}>{g.name} ({g.nature})</option>)}
+                  </select>
+                </div>
+                <div className="form-row">
+                  <div className="form-group"><label className="form-label">Opening Balance (₹)</label><input type="number" className="form-input" defaultValue={0} {...register('openingBalance')} /></div>
+                  <div className="form-group"><label className="form-label">Dr / Cr</label>
+                    <select className="form-input" {...register('openingType')}><option value="Dr">Dr (Debit)</option><option value="Cr">Cr (Credit)</option></select>
+                  </div>
+                </div>
+                <div className="form-group"><label style={{ display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13 }}><input type="checkbox" {...register('isBankAccount')} /> This is a Bank Account</label></div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAdd(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary">Create Ledger</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {tab === 'ledgers' ? (
+        <>
+          <div style={{ position: 'relative', maxWidth: 360, marginBottom: 16 }}>
+            <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)' }} />
+            <input className="form-input" style={{ paddingLeft: 36 }} placeholder="Search ledgers..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <div className="tbl-wrap">
+            <table>
+              <thead><tr><th>Ledger Name</th><th>Group</th><th>Nature</th><th>Opening Balance</th><th>Actions</th></tr></thead>
+              <tbody>
+                {isLoading ? [1,2,3,4,5].map(i => <tr key={i}>{[180,120,80,100,80].map((w,j) => <td key={j}><div className="skeleton" style={{height:14,width:w}}/></td>)}</tr>) :
+                ledgers.map(l => (
+                  <tr key={l.id}>
+                    <td className="td-bold">{l.name}</td>
+                    <td style={{ color: 'var(--text2)' }}>{l.group?.name}</td>
+                    <td><span className="badge" style={{ background: `${natureColors[l.group?.nature]}18`, color: natureColors[l.group?.nature] }}>{l.group?.nature}</span></td>
+                    <td className="td-mono">{fmt(l.openingBalance)} <span style={{ color: l.openingType === 'Dr' ? 'var(--info)' : 'var(--danger)', fontSize: 11 }}>{l.openingType}</span></td>
+                    <td><button className="btn btn-secondary btn-sm">Edit</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <div>
+          {trialBalance ? (
+            <>
+              <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                <div className="card" style={{ flex: 1, textAlign: 'center', padding: 16 }}><div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 4 }}>Total Debit</div><div style={{ fontSize: 22, fontWeight: 700, color: 'var(--info)' }}>{fmt(trialBalance.totals?.debit)}</div></div>
+                <div className="card" style={{ flex: 1, textAlign: 'center', padding: 16 }}><div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 4 }}>Total Credit</div><div style={{ fontSize: 22, fontWeight: 700, color: 'var(--danger)' }}>{fmt(trialBalance.totals?.credit)}</div></div>
+                <div className="card" style={{ flex: 1, textAlign: 'center', padding: 16 }}><div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 4 }}>Difference</div><div style={{ fontSize: 22, fontWeight: 700, color: trialBalance.totals?.difference < 0.01 ? 'var(--success)' : 'var(--danger)' }}>{trialBalance.totals?.difference < 0.01 ? '✓ Balanced' : fmt(trialBalance.totals?.difference)}</div></div>
+              </div>
+              <div className="tbl-wrap">
+                <table>
+                  <thead><tr><th>Ledger</th><th>Group</th><th>Debit (₹)</th><th>Credit (₹)</th></tr></thead>
+                  <tbody>
+                    {(trialBalance.ledgers || []).filter(l => l.balance > 0).map(l => (
+                      <tr key={l.id}>
+                        <td className="td-bold">{l.name}</td>
+                        <td style={{ color: 'var(--text2)' }}>{l.group}</td>
+                        <td className="td-mono">{l.balanceType === 'Dr' ? fmt(l.balance) : '—'}</td>
+                        <td className="td-mono">{l.balanceType === 'Cr' ? fmt(l.balance) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : <div className="card"><div className="empty-state"><div className="empty-state-icon">📊</div><div className="empty-state-title">Loading trial balance...</div></div></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+export default AccountingPage;
