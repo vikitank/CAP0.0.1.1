@@ -1,0 +1,79 @@
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import useAuthStore from '../store/authStore';
+import { companyApi } from '../services/api';
+import { useMutation } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+
+export default function SettingsPage() {
+  const { user, getActiveCompany } = useAuthStore();
+  const company = getActiveCompany();
+  const [tab, setTab] = useState('company');
+  const { register, handleSubmit } = useForm({ defaultValues: { name: company?.name, gstin: company?.gstin } });
+
+  const updateMutation = useMutation({
+    mutationFn: (d) => companyApi.update(company?.id, d),
+    onSuccess: () => toast.success('Company updated!'),
+    onError: () => toast.error('Failed to update'),
+  });
+
+  return (
+    <div className="fade-in">
+      <h1 className="page-title" style={{marginBottom:4}}>Settings</h1>
+      <p className="page-sub" style={{marginBottom:20}}>Company, users, integrations</p>
+      <div style={{display:'flex',gap:4,background:'var(--bg)',borderRadius:10,padding:4,marginBottom:24,width:'fit-content'}}>
+        {[['company','Company'],['users','Users & Roles'],['integrations','Integrations']].map(([val,lbl])=>(
+          <button key={val} onClick={()=>setTab(val)} style={{padding:'8px 18px',borderRadius:8,border:'none',fontSize:13,fontWeight:600,cursor:'pointer',background:tab===val?'var(--surface)':'transparent',color:tab===val?'var(--blue)':'var(--text3)',boxShadow:tab===val?'var(--shadow)':'none'}}>{lbl}</button>
+        ))}
+      </div>
+
+      {tab === 'company' && (
+        <form onSubmit={handleSubmit(d=>updateMutation.mutate(d))}>
+          <div className="card" style={{marginBottom:16}}>
+            <div className="card-title" style={{marginBottom:20}}>Company Profile</div>
+            <div className="form-row"><div className="form-group"><label className="form-label">Company Name *</label><input className="form-input" {...register('name',{required:true})}/></div><div className="form-group"><label className="form-label">Legal Name</label><input className="form-input" {...register('legalName')}/></div></div>
+            <div className="form-row"><div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" placeholder="27AABCU9603R1ZX" {...register('gstin')}/></div><div className="form-group"><label className="form-label">PAN</label><input className="form-input" {...register('pan')}/></div></div>
+            <div className="form-row"><div className="form-group"><label className="form-label">Business Type</label><select className="form-input" {...register('businessType')}><option>Private Limited</option><option>LLP</option><option>Partnership</option><option>Proprietorship</option><option>Trust/NGO</option></select></div><div className="form-group"><label className="form-label">GST Registration Type</label><select className="form-input" {...register('registrationType')}><option>Regular</option><option>Composition</option><option>Unregistered</option></select></div></div>
+            <div className="form-group"><label className="form-label">Address</label><textarea className="form-input" rows={3} {...register('address')}/></div>
+            <div className="form-row-3"><div className="form-group"><label className="form-label">City</label><input className="form-input" {...register('city')}/></div><div className="form-group"><label className="form-label">State</label><input className="form-input" {...register('state')}/></div><div className="form-group"><label className="form-label">Pincode</label><input className="form-input" {...register('pincode')}/></div></div>
+            <div className="form-row"><div className="form-group"><label className="form-label">Phone</label><input className="form-input" {...register('phone')}/></div><div className="form-group"><label className="form-label">Email</label><input type="email" className="form-input" {...register('email')}/></div></div>
+          </div>
+          <div style={{display:'flex',justifyContent:'flex-end'}}><button type="submit" className="btn btn-primary">Save Changes</button></div>
+        </form>
+      )}
+
+      {tab === 'users' && (
+        <div className="card">
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}><div className="card-title">Team Members</div><button className="btn btn-primary btn-sm">+ Invite User</button></div>
+          <div className="tbl-wrap">
+            <table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr><td><div style={{display:'flex',alignItems:'center',gap:10}}><div style={{width:32,height:32,borderRadius:'50%',background:'var(--blue)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:700,fontSize:12}}>{user?.firstName?.[0]}{user?.lastName?.[0]}</div><div><div style={{fontWeight:600,fontSize:13}}>{user?.firstName} {user?.lastName}</div><div style={{fontSize:11,color:'var(--text3)'}}>Owner</div></div></div></td><td style={{color:'var(--text2)',fontSize:13}}>{user?.email}</td><td><span className="badge badge-blue">👑 Admin</span></td><td><span className="badge badge-success">Active</span></td><td><button className="btn btn-secondary btn-sm">Edit</button></td></tr>
+            </tbody></table>
+          </div>
+          <div style={{marginTop:20}}>
+            <div className="card-title" style={{marginBottom:12}}>Role Permissions Matrix</div>
+            <div className="tbl-wrap"><table><thead><tr><th>Module</th><th>Admin</th><th>Accountant</th><th>Inventory</th><th>Viewer</th></tr></thead>
+            <tbody>
+              {[['Voucher Entry','✓ Full','✓ Full','× No','View Only'],['GST & Taxes','✓ Full','✓ Full','× No','View Only'],['Inventory','✓ Full','View Only','✓ Full','View Only'],['Reports','✓ Full','✓ Full','Limited','View Only'],['User Management','✓ Full','× No','× No','× No']].map(([mod,...roles])=>(
+                <tr key={mod}><td className="td-bold">{mod}</td>{roles.map((r,i)=><td key={i} style={{color:r==='× No'?'var(--text3)':r==='✓ Full'?'var(--success)':'var(--text2)',fontWeight:r==='✓ Full'?700:400}}>{r}</td>)}</tr>
+              ))}
+            </tbody></table></div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'integrations' && (
+        <div className="grid2">
+          {[{name:'Razorpay',desc:'Payment gateway for subscriptions',icon:'💳',status:'Not connected'},{name:'GSTN e-Invoice',desc:'NIC portal for IRN generation',icon:'🧾',status:'Not connected'},{name:'Fast2SMS',desc:'OTP & notification SMS',icon:'📱',status:'Not connected'},{name:'Resend',desc:'Transactional emails',icon:'📧',status:'Not connected'}].map(s=>(
+            <div key={s.name} className="card" style={{display:'flex',alignItems:'center',gap:14}}>
+              <div style={{fontSize:32}}>{s.icon}</div>
+              <div style={{flex:1}}><div style={{fontWeight:700,color:'var(--text)'}}>{s.name}</div><div style={{fontSize:12,color:'var(--text3)',marginTop:2}}>{s.desc}</div></div>
+              <div style={{textAlign:'right'}}><div style={{fontSize:11,color:'var(--text3)',marginBottom:8}}>{s.status}</div><button className="btn btn-secondary btn-sm">Connect</button></div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
